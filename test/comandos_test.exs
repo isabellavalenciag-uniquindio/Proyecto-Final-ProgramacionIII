@@ -122,6 +122,18 @@ defmodule ComandosTest do
       assert resumen =~ "#{ctx.categoria}: 20 litros"
     end
 
+    test "need_status cancelada devuelve los recursos y no permite devolverlos otra vez", ctx do
+      sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _} = Inventario.registrar("R#{ctx.n}", "Agua", ctx.categoria, 50, "litros", ctx.ubicacion)
+      {:ok, n} = Necesidades.registrar(:agua, 30, :alta, ctx.zona, "", sesion.usuario.usuario)
+      {:ok, _} = Necesidades.asignar(n.id, ctx.categoria, 30)
+
+      assert {:ok, _, _} = Emergencias.ejecutar("need_status #{n.id} cancelada", sesion)
+      assert Inventario.disponibilidad(ctx.categoria) == 50
+      assert {:error, _, _} = Emergencias.ejecutar("cancel_need #{n.id}", sesion)
+      assert Inventario.disponibilidad(ctx.categoria) == 50
+    end
+
     test "el id de la necesidad se acepta como need001, n1 o N001", ctx do
       sesion = sesion_como("coordinador", ctx.n, ctx.zona)
       {:ok, _, _} = Emergencias.ejecutar("register_zone #{ctx.zona} Centro alto", sesion)

@@ -103,6 +103,32 @@ defmodule NecesidadesTest do
       assert Inventario.disponibilidad(ctx.categoria) == 50
     end
 
+    test "cambiar_estado devuelve una reserva parcial al cancelar con texto", ctx do
+      stock(ctx, 50)
+      {:ok, n} = Necesidades.registrar(:agua, 30, :alta, ctx.zona, "", "laura")
+      {:ok, _} = Necesidades.asignar(n.id, ctx.categoria, 10)
+
+      assert {:ok, %Necesidad{estado: :cancelada}} = Necesidades.cambiar_estado(n.id, "Cancelada")
+      assert Inventario.disponibilidad(ctx.categoria) == 50
+      assert {:error, :ya_cerrada} = Necesidades.cancelar(n.id)
+      assert Inventario.disponibilidad(ctx.categoria) == 50
+    end
+
+    test "cancelaciones simultáneas por ambas vías devuelven los recursos una sola vez", ctx do
+      stock(ctx, 50)
+      {:ok, n} = Necesidades.registrar(:agua, 30, :alta, ctx.zona, "", "laura")
+      {:ok, _} = Necesidades.asignar(n.id, ctx.categoria, 30)
+
+      resultados =
+        [fn -> Necesidades.cancelar(n.id) end, fn -> Necesidades.cambiar_estado(n.id, :cancelada) end]
+        |> Enum.map(&Task.async/1)
+        |> Task.await_many()
+
+      assert Enum.count(resultados, &match?({:ok, _}, &1)) == 1
+      assert Enum.count(resultados, &match?({:error, :ya_cerrada}, &1)) == 1
+      assert Inventario.disponibilidad(ctx.categoria) == 50
+    end
+
     test "dos necesidades compiten por 50 L (30 y 25): solo una se asigna", ctx do
       stock(ctx, 50)
       {:ok, a} = Necesidades.registrar(:agua, 30, :critica, ctx.zona, "", "laura")
