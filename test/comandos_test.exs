@@ -1,0 +1,245 @@
+defmodule ComandosTest do
+  use ExUnit.Case
+
+  setup do
+    n = System.unique_integer([:positive])
+    {:ok, n: n, zona: "zona#{n}", categoria: "agua#{n}", ubicacion: "centro#{n}"}
+  end
+
+  # Ejecuta varias líneas seguidas sobre la misma sesión y devuelve el último resultado
+  defp correr(lineas, sesion) do
+    Enum.reduce(lineas, {:ok, "", sesion}, fn linea, {_, _, s} -> Emergencias.ejecutar(linea, s) end)
+  end
+
+  # El nombre de usuario lleva el tipo, un sufijo opcional y un número único
+  defp sesion_como(tipo, n, zona, sufijo \\ "") do
+    {:ok, _, sesion} = Emergencias.ejecutar("connect #{tipo}#{sufijo}#{n} 1234 #{tipo} #{zona}", Emergencias.nueva_sesion())
+    sesion
+  end
+
+  describe "tokenizar/1" do
+    test "separa por espacios y respeta las comillas" do
+      assert Comandos.tokenizar("a  b   c") == ["a", "b", "c"]
+      assert Comandos.tokenizar(~s(send_family_message 123 "Estoy bien, estoy aquí")) ==
+               ["send_family_message", "123", "Estoy bien, estoy aquí"]
+    end
+
+    test "línea vacía y comillas sin cerrar" do
+      assert Comandos.tokenizar("   ") == []
+      assert {:error, :comillas_sin_cerrar} = Comandos.tokenizar(~s(a "b c))
+    end
+  end
+
+  describe "sesión y permisos" do
+    test "sin conectarse solo se puede help, connect y exit" do
+      assert {:error, texto, _} = Emergencias.ejecutar("summary", Emergencias.nueva_sesion())
+      assert texto =~ "conectarse"
+      assert {:ok, ayuda, _} = Emergencias.ejecutar("help", Emergencias.nueva_sesion())
+      assert ayuda =~ "connect"
+    end
+
+    test "comando desconocido y línea vacía" do
+      assert {:error, texto, _} = Emergencias.ejecutar("volar", Emergencias.nueva_sesion())
+      assert texto =~ "desconocido"
+      assert {:ok, "", _} = Emergencias.ejecutar("", Emergencias.nueva_sesion())
+    end
+
+    test "connect registra automáticamente y valida la contraseña después", ctx do
+      usuario = "laura#{ctx.n}"
+      assert {:ok, texto, sesion} = Emergencias.ejecutar("connect #{usuario} 1234 coordinador centro", Emergencias.nueva_sesion())
+      assert texto =~ "registrado y conectado"
+      assert sesion.usuario.tipo == :coordinador
+
+      assert {:ok, _, sin_sesion} = Emergencias.ejecutar("disconnect", sesion)
+      assert sin_sesion.usuario == nil
+      assert {:error, texto, _} = Emergencias.ejecutar("connect #{usuario} 0000", sin_sesion)
+      assert texto =~ "Contraseña incorrecta"
+      assert {:ok, texto, _} = Emergencias.ejecutar("connect #{usuario} 1234", sin_sesion)
+      assert texto =~ "conectado como coordinador"
+    end
+
+    test "un ciudadano no puede ejecutar comandos de coordinador", ctx do
+      sesion = sesion_como("ciudadano", ctx.n, ctx.zona)
+      assert {:error, texto, _} = Emergencias.ejecutar("register_zone z1 Zona alto", sesion)
+      assert texto =~ "no puede ejecutar"
+      assert {:error, _, _} = Emergencias.ejecutar("assign_resource N001 agua 5", sesion)
+      assert {:error, _, _} = Emergencias.ejecutar("list_users", sesion)
+    end
+
+    test "help muestra solo los comandos del rol", ctx do
+      {:ok, ayuda, _} = Emergencias.ejecutar("help", sesion_como("ciudadano", ctx.n, ctx.zona))
+      assert ayuda =~ "register_need"
+      refute ayuda =~ "assign_resource"
+    end
+
+    test "exit cierra la sesión", ctx do
+      sesion = sesion_como("voluntario", ctx.n, ctx.zona)
+      assert {:salir, _, %{usuario: nil}} = Emergencias.ejecutar("exit", sesion)
+      refute Usuarios.conectado?("voluntario#{ctx.n}")
+    end
+  end
+
+  describe "validación de argumentos" do
+    test "muestra el uso cuando faltan argumentos", ctx do
+      sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      assert {:error, "Uso: " <> uso, _} = Emergencias.ejecutar("assign_resource N001", sesion)
+      assert uso =~ "assign_resource"
+    end
+
+    test "rechaza datos inválidos sin cambiar el estado", ctx do
+      sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _, _} = Emergencias.ejecutar("register_zone #{ctx.zona} Zona alto", sesion)
+
+      assert {:error, t1, _} = Emergencias.ejecutar("register_need agua -5 alta #{ctx.zona}", sesion)
+      assert t1 =~ "cantidad"
+      assert {:error, t2, _} = Emergencias.ejecutar("register_need agua 5 urgente #{ctx.zona}", sesion)
+      assert t2 =~ "Prioridad"
+      assert {:error, t3, _} = Emergencias.ejecutar("register_need agua 5 alta zona_que_no_existe", sesion)
+      assert t3 =~ "no existe"
+      assert {:error, t4, _} = Emergencias.ejecutar("list_needs color=rojo", sesion)
+      assert t4 =~ "Filtro inválido"
+      assert {:error, _, _} = Emergencias.ejecutar("register_resource R1 agua -3 litros bodega", sesion)
+    end
+  end
+
+  describe "flujo del enunciado" do
+    test "necesidad, recurso, asignación y resumen", ctx do
+      sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+
+      {:ok, _, _} = Emergencias.ejecutar("register_zone #{ctx.zona} Centro critico 500", sesion)
+      {:ok, texto, _} = Emergencias.ejecutar(~s(register_need agua 30 critica #{ctx.zona} "Punto de atención sector 3"), sesion)
+      assert texto =~ "Necesidad N"
+      [id] = Regex.run(~r/N\d+/, texto)
+
+      {:ok, _, _} = Emergencias.ejecutar("register_resource R#{ctx.n} agua 50 litros #{ctx.ubicacion} #{ctx.categoria}", sesion)
+      {:ok, asignacion, _} = Emergencias.ejecutar("assign_resource #{id} #{ctx.categoria} 30", sesion)
+      assert asignacion =~ "30/30"
+      assert Inventario.disponibilidad(ctx.categoria) == 20
+
+      {:ok, listado, _} = Emergencias.ejecutar("list_needs zona=#{ctx.zona} estado=asignada", sesion)
+      assert listado =~ id
+      {:ok, resumen, _} = Emergencias.ejecutar("summary", sesion)
+      assert resumen =~ "#{ctx.categoria}: 20 litros"
+    end
+
+    test "el id de la necesidad se acepta como need001, n1 o N001", ctx do
+      sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _, _} = Emergencias.ejecutar("register_zone #{ctx.zona} Centro alto", sesion)
+      {:ok, texto, _} = Emergencias.ejecutar("register_need agua 5 alta #{ctx.zona} desc", sesion)
+      [id] = Regex.run(~r/N\d+/, texto)
+      numero = id |> String.trim_leading("N") |> String.to_integer()
+
+      assert {:ok, _, _} = Emergencias.ejecutar("need_status need#{numero} cancelada", sesion)
+      assert {:error, texto, _} = Emergencias.ejecutar("need_status n#{numero} cancelada", sesion)
+      assert texto =~ "cerrada"
+    end
+
+    test "personas, mensajes y albergue", ctx do
+      coordinador = sesion_como("coordinador", ctx.n, ctx.zona)
+      ciudadano = sesion_como("ciudadano", ctx.n, ctx.zona)
+      voluntario = sesion_como("voluntario", ctx.n, ctx.zona)
+      doc = "#{ctx.n}"
+
+      {:ok, _, _} = Emergencias.ejecutar("register_zone #{ctx.zona} Norte alto", coordinador)
+      {:ok, _, _} = Emergencias.ejecutar(~s(register_shelter A#{ctx.n} "Albergue Norte" #{ctx.zona} 2), coordinador)
+
+      {:ok, t, _} = Emergencias.ejecutar("report_person #{doc} Andrés #{ctx.zona} localizada 30", ciudadano)
+      assert t =~ "registrada como localizada"
+      assert {:error, _, _} = Emergencias.ejecutar("report_person #{doc} Otro #{ctx.zona} localizada", ciudadano)
+
+      {:ok, _, _} = Emergencias.ejecutar(~s(send_family_message #{doc} "Estoy bien, estoy en el albergue norte"), ciudadano)
+      {:ok, mensajes, _} = Emergencias.ejecutar("list_family_messages #{doc}", ciudadano)
+      assert mensajes =~ "Estoy bien, estoy en el albergue norte"
+      assert mensajes =~ "[pendiente]"
+
+      {:ok, ingreso, _} = Emergencias.ejecutar("register_entry A#{ctx.n} #{doc}", voluntario)
+      assert ingreso =~ "1/2"
+      {:ok, persona, _} = Emergencias.ejecutar("find_person #{doc}", ciudadano)
+      assert persona =~ "en_albergue"
+
+      {:ok, _, _} = Emergencias.ejecutar("register_entry A#{ctx.n} otra#{ctx.n}", voluntario)
+      assert {:error, lleno, _} = Emergencias.ejecutar("register_entry A#{ctx.n} tercera#{ctx.n}", voluntario)
+      assert lleno =~ "cupos"
+      {:ok, estado, _} = Emergencias.ejecutar("check_shelter A#{ctx.n}", ciudadano)
+      assert estado =~ "2/2"
+    end
+
+    test "mascotas: reportar, coincidencias y confirmar", ctx do
+      voluntario = sesion_como("voluntario", ctx.n, ctx.zona)
+      coordinador = sesion_como("coordinador", ctx.n, ctx.zona)
+      especie = "especie#{ctx.n}"
+
+      {:ok, t1, _} = Emergencias.ejecutar(~s(report_pet lost #{especie} "Luna" negra mediana #{ctx.zona} 300), voluntario)
+      {:ok, t2, _} = Emergencias.ejecutar(~s(report_pet found #{especie} desconocido negra mediana #{ctx.zona} 301), voluntario)
+      [perdida] = Regex.run(~r/M\d+/, t1)
+      [encontrada] = Regex.run(~r/M\d+/, t2)
+
+      {:ok, pares, _} = Emergencias.ejecutar("match_pets", voluntario)
+      assert pares =~ "#{perdida} (perdida) ~ #{encontrada} (encontrada)"
+
+      assert {:error, _, _} = Emergencias.ejecutar("confirm_match #{perdida} #{encontrada}", voluntario)
+      assert {:ok, confirmado, _} = Emergencias.ejecutar("confirm_match #{perdida} #{encontrada}", coordinador)
+      assert confirmado =~ "resueltas"
+      assert {:error, repetido, _} = Emergencias.ejecutar("confirm_match #{perdida} #{encontrada}", coordinador)
+      assert repetido =~ "ya está resuelto"
+    end
+
+    test "transferencias entre centros", ctx do
+      sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _, _} = Emergencias.ejecutar("register_resource R#{ctx.n} agua 200 litros #{ctx.ubicacion} #{ctx.categoria}", sesion)
+      {:ok, texto, _} = Emergencias.ejecutar("transfer_resource R#{ctx.n} #{ctx.ubicacion} albergue_#{ctx.n} 30", sesion)
+      assert texto =~ "170"
+      assert {:error, _, _} = Emergencias.ejecutar("transfer_resource R#{ctx.n} #{ctx.ubicacion} albergue_#{ctx.n} 500", sesion)
+      assert Inventario.disponibilidad(ctx.categoria) == 200
+    end
+  end
+
+  describe "actividad" do
+    test "se registra lo que hace cada usuario, sin la contraseña", ctx do
+      sesion = sesion_como("ciudadano", ctx.n, ctx.zona)
+      {:ok, _, _} = Emergencias.ejecutar("summary", sesion)
+      usuario = "ciudadano#{ctx.n}"
+
+      comandos = Usuarios.actividad(usuario) |> Enum.map(fn {_u, _f, c} -> c end)
+      assert "summary" in comandos
+      assert "connect #{usuario}" in comandos
+      refute Enum.any?(comandos, &String.contains?(&1, "1234"))
+    end
+
+    test "solo el administrador ve la actividad", ctx do
+      assert {:error, _, _} = Emergencias.ejecutar("activity", sesion_como("coordinador", ctx.n, ctx.zona))
+      assert {:ok, _, _} = Emergencias.ejecutar("activity", sesion_como("administrador", ctx.n, ctx.zona))
+    end
+  end
+
+  describe "concurrencia entre usuarios" do
+    test "dos coordinadores piden 30 y 25 L de 50 disponibles a la vez: solo una asignación se confirma", ctx do
+      admin = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _, _} = Emergencias.ejecutar("register_zone #{ctx.zona} Centro critico", admin)
+      {:ok, _, _} = Emergencias.ejecutar("register_resource R#{ctx.n} agua 50 litros #{ctx.ubicacion} #{ctx.categoria}", admin)
+      {:ok, a, _} = Emergencias.ejecutar("register_need agua 30 critica #{ctx.zona} Laura", admin)
+      {:ok, b, _} = Emergencias.ejecutar("register_need agua 25 alta #{ctx.zona} Pedro", admin)
+      [id_a] = Regex.run(~r/N\d+/, a)
+      [id_b] = Regex.run(~r/N\d+/, b)
+
+      resultados =
+        [{"uno", id_a, 30}, {"dos", id_b, 25}]
+        |> Enum.map(fn {quien, id, cantidad} ->
+          Task.async(fn ->
+            sesion = sesion_como("coordinador", ctx.n, ctx.zona, quien)
+            elem(Emergencias.ejecutar("assign_resource #{id} #{ctx.categoria} #{cantidad}", sesion), 0)
+          end)
+        end)
+        |> Task.await_many()
+
+      assert Enum.sort(resultados) == [:error, :ok]
+      assert Inventario.disponibilidad(ctx.categoria) in [20, 25]
+    end
+
+    test "demo_conflicto del módulo Emergencias" do
+      %{resultados: resultados, existencias_finales: finales} = Emergencias.demo_conflicto()
+      assert length(resultados) == 2
+      assert finales in [20, 25]
+    end
+  end
+end
