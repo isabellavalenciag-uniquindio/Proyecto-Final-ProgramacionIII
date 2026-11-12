@@ -49,6 +49,29 @@ defmodule PersistenciaTest do
       assert n |> Necesidad.a_fila() |> Necesidad.desde_fila() == n
     end
 
+    test "las reservas conservan sus claves y se pueden devolver después de leer el CSV", %{ruta: ruta} do
+      codigo = "R#{System.unique_integer([:positive])}:agua;50%"
+      ubicacion = "Bodega:norte;área 2"
+      {:ok, _} = Inventario.registrar(codigo, "Agua", "agua", 50, "litros", ubicacion)
+      {:ok, detalle} = Inventario.reservar(codigo, 30)
+      {:ok, n} = Necesidad.nuevo("N001", :agua, 30, :alta, "norte", "", "ana")
+      {:ok, n} = Necesidad.asignar(n, detalle)
+
+      assert :ok = Archivo.escribir_en(ruta, [Necesidad.a_fila(n)])
+      assert [fila] = Archivo.leer_en(ruta)
+      recuperada = Necesidad.desde_fila(fila)
+      assert recuperada == n
+      assert :ok = Inventario.liberar(recuperada.asignaciones)
+      assert Inventario.disponibilidad(codigo) == 50
+    end
+
+    test "lee las asignaciones del formato anterior, incluso si el código es v2" do
+      fila = ["N001", "agua", "30", "alta", "norte", "", "ana", "asignada", "v2:centro_1:10;R002:centro_2:20"]
+      n = Necesidad.desde_fila(fila)
+      assert n.asignaciones == [{"v2", "centro_1", 10}, {"R002", "centro_2", 20}]
+      assert n |> Necesidad.a_fila() |> Necesidad.desde_fila() == n
+    end
+
     test "Albergue" do
       {:ok, a} = Albergue.nuevo("A01", "Norte", "zona_norte", 10)
       {:ok, a} = Albergue.ingresar(a, "111")
