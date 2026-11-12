@@ -128,6 +128,35 @@ defmodule InventarioTest do
       registrar(ctx, 10)
       assert {:error, :mismo_lugar} = Inventario.transferir(ctx.codigo, ctx.ubicacion, ctx.ubicacion, 1)
     end
+
+    test "rechaza el mismo lugar aunque tenga espacios y conserva las existencias", ctx do
+      registrar(ctx, 50)
+
+      assert {:error, :mismo_lugar} =
+               Inventario.transferir(ctx.codigo, ctx.ubicacion, " #{ctx.ubicacion} ", 10)
+
+      assert {:ok, %Recurso{cantidad: 50}} = Inventario.obtener(ctx.codigo, ctx.ubicacion)
+      assert Inventario.disponibilidad(ctx.categoria) == 50
+    end
+
+    test "normaliza el destino antes de buscarlo para no sobrescribir sus existencias", ctx do
+      registrar(ctx, 50)
+      destino = ctx.ubicacion <> "_destino"
+      {:ok, _} = Inventario.registrar(ctx.codigo, "Agua", ctx.categoria, 100, "litros", destino)
+
+      assert {:ok, %{origen: origen, destino: recibido}} =
+               Inventario.transferir(" #{ctx.codigo} ", " #{ctx.ubicacion} ", " #{destino} ", 10)
+
+      assert origen.cantidad == 40
+      assert recibido.cantidad == 110
+      assert Inventario.disponibilidad(ctx.categoria) == 150
+    end
+
+    test "un destino vacío no descuenta existencias", ctx do
+      registrar(ctx, 50)
+      assert {:error, :texto_vacio} = Inventario.transferir(ctx.codigo, ctx.ubicacion, "  ", 10)
+      assert Inventario.disponibilidad(ctx.categoria) == 50
+    end
   end
 
   test "criticos/1 lista los recursos con pocas existencias", ctx do

@@ -152,7 +152,10 @@ defmodule Inventario do
   end
 
   def handle_call({:transferir, codigo, origen, destino, cantidad}, _from, recursos) do
-    with :ok <- distintos(origen, destino),
+    with {:ok, codigo} <- Validacion.texto(codigo),
+         {:ok, origen} <- Validacion.texto(origen),
+         {:ok, destino} <- Validacion.texto(destino),
+         :ok <- distintos(origen, destino),
          {:ok, desde} <- buscar(recursos, codigo, origen),
          {:ok, desde_nuevo} <- Recurso.restar(desde, cantidad, :transferencia_salida),
          {:ok, hacia_nuevo} <- recibir(recursos, desde, destino, cantidad) do
