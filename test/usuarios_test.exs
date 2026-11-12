@@ -79,6 +79,18 @@ defmodule UsuariosTest do
       assert {:error, :no_conectado} = Usuarios.desconectar(nombre)
     end
 
+    test "valida sesiones emitidas y rechaza las revocadas o inventadas" do
+      nombre = nuevo_nombre()
+      {:ok, sesion} = Usuarios.conectar(nombre, "1234", "ciudadano", "z")
+      assert {:ok, %{usuario: ^nombre}} = Usuarios.validar_sesion(sesion)
+      assert {:error, :sin_sesion} = Usuarios.validar_sesion(%{usuario: nombre})
+      assert {:error, :sin_sesion} = Usuarios.validar_sesion(%{usuario: nombre, sesion_id: make_ref()})
+      refute Enum.any?(Usuarios.listar(), &Map.has_key?(&1, :sesion_id))
+
+      assert :ok = Usuarios.desconectar(nombre, sesion.sesion_id)
+      assert {:error, :sin_sesion} = Usuarios.validar_sesion(sesion)
+    end
+
     test "registrar no permite repetidos" do
       nombre = nuevo_nombre()
       assert {:ok, _} = Usuarios.registrar(nombre, "1234", "Nombre", "voluntario", "z")

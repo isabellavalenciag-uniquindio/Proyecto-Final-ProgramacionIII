@@ -58,6 +58,41 @@ defmodule ComandosTest do
       assert texto =~ "conectado como coordinador"
     end
 
+    test "una sesión desconectada sigue invalidada aunque el usuario vuelva a conectarse", ctx do
+      anterior = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _, _} = Emergencias.ejecutar("disconnect", anterior)
+      actual = sesion_como("coordinador", ctx.n, ctx.zona)
+
+      assert {:error, texto, %{usuario: nil}} = Emergencias.ejecutar("summary", anterior)
+      assert texto =~ "conectarse"
+      assert {:salir, _, _} = Emergencias.ejecutar("exit", anterior)
+      assert {:ok, _, _} = Emergencias.ejecutar("summary", actual)
+    end
+
+    test "desconectar al usuario invalida todas sus sesiones", ctx do
+      sesion = sesion_como("ciudadano", ctx.n, ctx.zona)
+      assert :ok = Usuarios.desconectar(sesion.usuario.usuario)
+      assert {:error, _, %{usuario: nil}} = Emergencias.ejecutar("summary", sesion)
+    end
+
+    test "cada conexión tiene su sesión y cerrar una conserva la otra", ctx do
+      primera = sesion_como("ciudadano", ctx.n, ctx.zona)
+      segunda = sesion_como("ciudadano", ctx.n, ctx.zona)
+      refute primera.usuario.sesion_id == segunda.usuario.sesion_id
+
+      assert {:ok, _, _} = Emergencias.ejecutar("disconnect", primera)
+      assert {:error, _, _} = Emergencias.ejecutar("summary", primera)
+      assert {:ok, _, _} = Emergencias.ejecutar("summary", segunda)
+      assert Usuarios.conectado?(segunda.usuario.usuario)
+    end
+
+    test "los permisos se consultan con el rol guardado y no con un mapa modificado", ctx do
+      sesion = sesion_como("ciudadano", ctx.n, ctx.zona)
+      alterada = put_in(sesion, [:usuario, :tipo], :administrador)
+      assert {:error, _, nueva} = Emergencias.ejecutar("list_users", alterada)
+      assert nueva.usuario.tipo == :ciudadano
+    end
+
     test "un ciudadano no puede ejecutar comandos de coordinador", ctx do
       sesion = sesion_como("ciudadano", ctx.n, ctx.zona)
       assert {:error, texto, _} = Emergencias.ejecutar("register_zone z1 Zona alto", sesion)

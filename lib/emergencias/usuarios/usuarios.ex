@@ -33,9 +33,17 @@ defmodule Usuarios do
     GenServer.call(__MODULE__, {:registrar, usuario, clave, nombre, tipo, zona})
   end
 
-  @doc "Desconecta al usuario."
-  @spec desconectar(String.t()) :: :ok | {:error, :no_conectado}
-  def desconectar(usuario), do: GenServer.call(__MODULE__, {:desconectar, usuario})
+  @doc "Desconecta una sesión, o todas las del usuario si no se indica una."
+  @spec desconectar(String.t(), reference() | :todas) :: :ok | {:error, :no_conectado}
+  def desconectar(usuario, sesion_id \\ :todas), do: GenServer.call(__MODULE__, {:desconectar, usuario, sesion_id})
+
+  @doc "Valida una sesión en memoria y devuelve los datos actuales del usuario."
+  @spec validar_sesion(map()) :: {:ok, map()} | {:error, :sin_sesion}
+  def validar_sesion(%{usuario: usuario, sesion_id: sesion_id}) do
+    GenServer.call(__MODULE__, {:validar_sesion, usuario, sesion_id})
+  end
+
+  def validar_sesion(_), do: {:error, :sin_sesion}
 
   @spec conectado?(String.t()) :: boolean()
   def conectado?(usuario), do: GenServer.call(__MODULE__, {:conectado?, usuario})
@@ -64,7 +72,7 @@ defmodule Usuarios do
 
     actividad = :actividad |> Persistencia.cargar() |> Enum.map(fn [u, fecha, comando] -> {u, fecha, comando} end)
 
-    {:ok, %{usuarios: usuarios, conectados: MapSet.new(), actividad: actividad}}
+    {:ok, %{usuarios: usuarios, conectados: %{}, actividad: actividad}}
   end
 
   @impl true
@@ -74,7 +82,8 @@ defmodule Usuarios do
     case Map.fetch(estado.usuarios, nombre) do
       {:ok, existente} ->
         if Usuario.verificar_clave(existente, clave) do
-          {:reply, {:ok, info(existente, false)}, conectar_sesion(estado, nombre)}
+          {sesion, actualizado} = conectar_sesion(estado, existente, false)
+          {:reply, {:ok, sesion}, actualizado}
         else
           {:reply, {:error, :clave_incorrecta}, estado}
         end
@@ -82,8 +91,8 @@ defmodule Usuarios do
       :error ->
         case Usuario.nuevo(usuario, clave, usuario, tipo, zona) do
           {:ok, nuevo} ->
-            estado = estado |> agregar(nuevo) |> conectar_sesion(nuevo.usuario)
-            {:reply, {:ok, info(nuevo, true)}, estado}
+            {sesion, actualizado} = estado |> agregar(nuevo) |> conectar_sesion(nuevo, true)
+            {:reply, {:ok, sesion}, actualizado}
 
           {:error, _} = error ->
             {:reply, error, estado}
@@ -101,18 +110,48 @@ defmodule Usuarios do
     end
   end
 
-  def handle_call({:desconectar, usuario}, _from, estado) do
+  def handle_call({:desconectar, usuario, sesion_id}, _from, estado) do
     nombre = Usuario.normalizar_usuario(usuario)
 
-    if MapSet.member?(estado.conectados, nombre) do
-      {:reply, :ok, %{estado | conectados: MapSet.delete(estado.conectados, nombre)}}
-    else
-      {:reply, {:error, :no_conectado}, estado}
+    case Map.fetch(estado.conectados, nombre) do
+      {:ok, sesiones} ->
+        cond do
+          sesion_id == :todas ->
+            {:reply, :ok, %{estado | conectados: Map.delete(estado.conectados, nombre)}}
+
+          MapSet.member?(sesiones, sesion_id) ->
+            restantes = MapSet.delete(sesiones, sesion_id)
+            conectados =
+              if MapSet.size(restantes) == 0,
+                do: Map.delete(estado.conectados, nombre),
+                else: Map.put(estado.conectados, nombre, restantes)
+
+            {:reply, :ok, %{estado | conectados: conectados}}
+
+          true ->
+            {:reply, {:error, :no_conectado}, estado}
+        end
+
+      :error ->
+        {:reply, {:error, :no_conectado}, estado}
     end
   end
 
   def handle_call({:conectado?, usuario}, _from, estado) do
-    {:reply, MapSet.member?(estado.conectados, Usuario.normalizar_usuario(usuario)), estado}
+    {:reply, Map.has_key?(estado.conectados, Usuario.normalizar_usuario(usuario)), estado}
+  end
+
+  def handle_call({:validar_sesion, usuario, sesion_id}, _from, estado) do
+    resultado =
+      with {:ok, sesiones} <- Map.fetch(estado.conectados, usuario),
+           true <- MapSet.member?(sesiones, sesion_id),
+           {:ok, u} <- Map.fetch(estado.usuarios, usuario) do
+        {:ok, Map.put(info(u, false), :sesion_id, sesion_id)}
+      else
+        _ -> {:error, :sin_sesion}
+      end
+
+    {:reply, resultado, estado}
   end
 
   def handle_call({:actividad, usuario, limite}, _from, estado) do
@@ -130,7 +169,7 @@ defmodule Usuarios do
       estado.usuarios
       |> Map.values()
       |> Enum.sort_by(& &1.usuario)
-      |> Enum.map(fn u -> Map.put(info(u, false), :conectado, MapSet.member?(estado.conectados, u.usuario)) end)
+      |> Enum.map(fn u -> Map.put(info(u, false), :conectado, Map.has_key?(estado.conectados, u.usuario)) end)
 
     {:reply, lista, estado}
   end
@@ -147,7 +186,11 @@ defmodule Usuarios do
 
   defp info(u, nuevo), do: %{usuario: u.usuario, nombre: u.nombre, tipo: u.tipo, zona: u.zona, nuevo: nuevo}
 
-  defp conectar_sesion(estado, nombre), do: %{estado | conectados: MapSet.put(estado.conectados, nombre)}
+  defp conectar_sesion(estado, usuario, nuevo) do
+    sesion_id = make_ref()
+    conectados = Map.update(estado.conectados, usuario.usuario, MapSet.new([sesion_id]), &MapSet.put(&1, sesion_id))
+    {Map.put(info(usuario, nuevo), :sesion_id, sesion_id), %{estado | conectados: conectados}}
+  end
 
   defp agregar(estado, usuario) do
     usuarios = Map.put(estado.usuarios, usuario.usuario, usuario)

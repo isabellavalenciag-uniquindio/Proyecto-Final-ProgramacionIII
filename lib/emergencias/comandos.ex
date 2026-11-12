@@ -91,6 +91,8 @@ defmodule Comandos do
   """
   @spec ejecutar(String.t(), map()) :: {:ok | :error | :salir, String.t(), map()}
   def ejecutar(linea, sesion) do
+    sesion = actualizar_sesion(sesion)
+
     case tokenizar(linea) do
       {:error, razon} ->
         {:error, mensaje_error(razon), sesion}
@@ -158,6 +160,15 @@ defmodule Comandos do
     end
   end
 
+  defp actualizar_sesion(%{usuario: nil} = sesion), do: sesion
+
+  defp actualizar_sesion(%{usuario: usuario} = sesion) do
+    case Usuarios.validar_sesion(usuario) do
+      {:ok, actual} -> %{sesion | usuario: actual}
+      {:error, :sin_sesion} -> %{sesion | usuario: nil}
+    end
+  end
+
   defp autorizar(comando, _sesion) when comando in [:connect, :help, :exit], do: :ok
   defp autorizar(_comando, %{usuario: nil}), do: {:error, :sin_sesion}
 
@@ -178,7 +189,7 @@ defmodule Comandos do
     case Usuarios.conectar(usuario, clave, tipo, zona) do
       {:ok, info} ->
         # Si ya había otra sesión abierta, se cierra
-        if sesion.usuario && sesion.usuario.usuario != info.usuario, do: Usuarios.desconectar(sesion.usuario.usuario)
+        if sesion.usuario, do: Usuarios.desconectar(sesion.usuario.usuario, sesion.usuario.sesion_id)
         accion = if info.nuevo, do: "registrado y conectado", else: "conectado"
         {:ok, "Usuario #{info.usuario} #{accion} como #{info.tipo} (zona #{info.zona}).", %{sesion | usuario: info}}
 
@@ -188,12 +199,12 @@ defmodule Comandos do
   end
 
   defp correr(:disconnect, [], %{usuario: usuario} = sesion) do
-    Usuarios.desconectar(usuario.usuario)
+    Usuarios.desconectar(usuario.usuario, usuario.sesion_id)
     {:ok, "Usuario #{usuario.usuario} desconectado.", %{sesion | usuario: nil}}
   end
 
   defp correr(:exit, [], sesion) do
-    if sesion.usuario, do: Usuarios.desconectar(sesion.usuario.usuario)
+    if sesion.usuario, do: Usuarios.desconectar(sesion.usuario.usuario, sesion.usuario.sesion_id)
     {:salir, "Hasta pronto.", %{sesion | usuario: nil}}
   end
 
