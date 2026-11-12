@@ -116,7 +116,7 @@ defmodule Comandos do
 
   @doc """
   Separa la línea en palabras. Lo que va entre comillas dobles es una sola
-  palabra. **Recursiva de cola**, carácter por carácter.
+  palabra, incluso si está vacía. **Recursiva de cola**, carácter por carácter.
 
   ## Ejemplos
 
@@ -127,21 +127,21 @@ defmodule Comandos do
       {:error, :comillas_sin_cerrar}
   """
   @spec tokenizar(String.t()) :: [String.t()] | {:error, :comillas_sin_cerrar}
-  def tokenizar(linea) when is_binary(linea), do: linea |> String.trim() |> String.graphemes() |> recorrer([], "", false)
+  def tokenizar(linea) when is_binary(linea), do: linea |> String.trim() |> String.graphemes() |> recorrer([], "", false, false)
   def tokenizar(_), do: []
 
-  defp recorrer([], _tokens, _actual, true), do: {:error, :comillas_sin_cerrar}
-  defp recorrer([], tokens, actual, false), do: Enum.reverse(cerrar(tokens, actual))
-  defp recorrer(["\"" | resto], tokens, actual, comillas), do: recorrer(resto, tokens, actual, not comillas)
+  defp recorrer([], _tokens, _actual, true, _iniciado), do: {:error, :comillas_sin_cerrar}
+  defp recorrer([], tokens, actual, false, iniciado), do: Enum.reverse(cerrar(tokens, actual, iniciado))
+  defp recorrer(["\"" | resto], tokens, actual, comillas, _iniciado), do: recorrer(resto, tokens, actual, not comillas, true)
 
-  defp recorrer([g | resto], tokens, actual, false) when g in [" ", "\t"] do
-    recorrer(resto, cerrar(tokens, actual), "", false)
+  defp recorrer([g | resto], tokens, actual, false, iniciado) when g in [" ", "\t"] do
+    recorrer(resto, cerrar(tokens, actual, iniciado), "", false, false)
   end
 
-  defp recorrer([g | resto], tokens, actual, comillas), do: recorrer(resto, tokens, actual <> g, comillas)
+  defp recorrer([g | resto], tokens, actual, comillas, _iniciado), do: recorrer(resto, tokens, actual <> g, comillas, true)
 
-  defp cerrar(tokens, ""), do: tokens
-  defp cerrar(tokens, actual), do: [actual | tokens]
+  defp cerrar(tokens, _actual, false), do: tokens
+  defp cerrar(tokens, actual, true), do: [actual | tokens]
 
   # ========== Comandos ==========
 

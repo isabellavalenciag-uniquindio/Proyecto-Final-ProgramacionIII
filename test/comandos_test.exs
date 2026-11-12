@@ -24,6 +24,17 @@ defmodule ComandosTest do
                ["send_family_message", "123", "Estoy bien, estoy aquí"]
     end
 
+    test "conserva argumentos vacíos al inicio, entre palabras y al final" do
+      assert Comandos.tokenizar(~s("" a "" "" b "")) == ["", "a", "", "", "b", ""]
+      assert Comandos.tokenizar(~s(  ""  )) == [""]
+      assert Comandos.tokenizar(~s(a\t""\tb)) == ["a", "", "b"]
+    end
+
+    test "las comillas pegadas a texto forman un solo argumento" do
+      assert Comandos.tokenizar(~s(a""b "dos palabras"final)) == ["ab", "dos palabrasfinal"]
+      assert Comandos.tokenizar(~s(a "sin cerrar)) == {:error, :comillas_sin_cerrar}
+    end
+
     test "línea vacía y comillas sin cerrar" do
       assert Comandos.tokenizar("   ") == []
       assert {:error, :comillas_sin_cerrar} = Comandos.tokenizar(~s(a "b c))
@@ -251,6 +262,26 @@ defmodule ComandosTest do
       assert {:ok, %Persona{estado: :reunificada}} = Personas.obtener(documento)
       assert {:ok, _, _} = Emergencias.ejecutar("register_exit #{albergue} #{sin_reporte}", sesion)
       assert {:ok, %{ocupacion: 0}} = Albergues.consultar(albergue)
+    end
+
+    test "reporta una mascota sin nombre y conserva la posición de los demás datos", ctx do
+      lineas = [
+        "connect vacio#{ctx.n} 1234 ciudadano #{ctx.zona}",
+        ~s(report_pet found perro "" negro mediano #{ctx.zona} 300)
+      ]
+
+      assert {:ok, texto, _} = correr(lineas, Emergencias.nueva_sesion())
+      assert texto =~ "Reporte M"
+      assert [%Mascota{nombre: "desconocido", color: "negro", tamano: :mediano, contacto: "300"}] =
+               Mascotas.listar(zona: ctx.zona)
+    end
+
+    test "un argumento obligatorio vacío se rechaza sin desplazar los siguientes", ctx do
+      sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      linea = ~s(register_resource RV#{ctx.n} "" 10 litros #{ctx.ubicacion} agua)
+
+      assert {:error, "Falta un dato obligatorio.", _} = Emergencias.ejecutar(linea, sesion)
+      assert {:error, :no_existe} = Inventario.obtener("RV#{ctx.n}", ctx.ubicacion)
     end
 
     test "mascotas: reportar, coincidencias y confirmar", ctx do
