@@ -434,7 +434,15 @@ defmodule Comandos do
   end
 
   defp correr(:register_exit, [codigo, documento], sesion) do
-    Albergues.salir(codigo, documento)
+    with {:ok, resumen} <- Albergues.salir(codigo, documento) do
+      # Solo cambia a quien aún figura en albergue; respeta los estados posteriores.
+      case Personas.obtener(documento) do
+        {:ok, %Persona{estado: :en_albergue}} -> Personas.actualizar_estado(documento, :trasladada)
+        _ -> :ok
+      end
+
+      {:ok, resumen}
+    end
     |> responder(sesion, &"Salida registrada. Ocupación #{&1.ocupacion}/#{&1.capacidad} (#{&1.cupos} cupos).")
   end
 

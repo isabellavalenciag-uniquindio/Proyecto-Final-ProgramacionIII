@@ -211,6 +211,48 @@ defmodule ComandosTest do
       assert estado =~ "2/2"
     end
 
+    test "la salida del albergue actualiza el estado de la persona y su historial", ctx do
+      sesion = sesion_como("voluntario", ctx.n, ctx.zona)
+      documento = "salida#{ctx.n}"
+      albergue = "AS#{ctx.n}"
+      {:ok, _} = Personas.reportar(documento, "Ana", ctx.zona, :localizada, 20)
+      {:ok, _} = Albergues.registrar(albergue, "Norte", ctx.zona, 2)
+      {:ok, _, _} = Emergencias.ejecutar("register_entry #{albergue} #{documento}", sesion)
+
+      assert {:ok, _, _} = Emergencias.ejecutar("register_exit #{albergue} #{documento}", sesion)
+      assert {:ok, %{ocupacion: 0, cupos: 2}} = Albergues.consultar(albergue)
+      assert {:ok, %Persona{estado: :trasladada}} = Personas.obtener(documento)
+      assert {:ok, [{:trasladada, _}, {:en_albergue, _}, {:localizada, _}]} = Personas.historial(documento)
+    end
+
+    test "una salida fallida no cambia el estado de la persona", ctx do
+      sesion = sesion_como("voluntario", ctx.n, ctx.zona)
+      documento = "ausente#{ctx.n}"
+      albergue = "AS#{ctx.n}"
+      {:ok, _} = Personas.reportar(documento, "Ana", ctx.zona, :en_albergue, 20)
+      {:ok, _} = Albergues.registrar(albergue, "Norte", ctx.zona, 2)
+
+      assert {:error, _, _} = Emergencias.ejecutar("register_exit #{albergue} #{documento}", sesion)
+      assert {:ok, %Persona{estado: :en_albergue}} = Personas.obtener(documento)
+    end
+
+    test "la salida respeta una reunificación y admite ocupantes sin reporte de persona", ctx do
+      sesion = sesion_como("voluntario", ctx.n, ctx.zona)
+      documento = "reunificada#{ctx.n}"
+      sin_reporte = "sin_reporte#{ctx.n}"
+      albergue = "AS#{ctx.n}"
+      {:ok, _} = Personas.reportar(documento, "Ana", ctx.zona, :en_albergue, 20)
+      {:ok, _} = Albergues.registrar(albergue, "Norte", ctx.zona, 2)
+      {:ok, _} = Albergues.ingresar(albergue, documento)
+      {:ok, _} = Albergues.ingresar(albergue, sin_reporte)
+      {:ok, _} = Personas.actualizar_estado(documento, :reunificada)
+
+      assert {:ok, _, _} = Emergencias.ejecutar("register_exit #{albergue} #{documento}", sesion)
+      assert {:ok, %Persona{estado: :reunificada}} = Personas.obtener(documento)
+      assert {:ok, _, _} = Emergencias.ejecutar("register_exit #{albergue} #{sin_reporte}", sesion)
+      assert {:ok, %{ocupacion: 0}} = Albergues.consultar(albergue)
+    end
+
     test "mascotas: reportar, coincidencias y confirmar", ctx do
       voluntario = sesion_como("voluntario", ctx.n, ctx.zona)
       coordinador = sesion_como("coordinador", ctx.n, ctx.zona)
