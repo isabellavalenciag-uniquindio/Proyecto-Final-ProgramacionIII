@@ -69,18 +69,18 @@ defmodule Necesidades do
     end
   end
 
-  @doc "Cambia el estado respetando las transiciones válidas."
+  @doc "Cambia el estado respetando las transiciones válidas y devuelve los recursos al cancelar."
   @spec cambiar_estado(String.t(), term()) :: {:ok, %Necesidad{}} | {:error, atom()}
-  def cambiar_estado(id, estado), do: GenServer.call(__MODULE__, {:cambiar_estado, id, estado})
-
-  @doc "Cancela la necesidad y devuelve al inventario lo que tenía asignado."
-  @spec cancelar(String.t()) :: {:ok, %Necesidad{}} | {:error, atom()}
-  def cancelar(id) do
-    with {:ok, necesidad} <- cambiar_estado(id, :cancelada) do
-      Inventario.liberar(necesidad.asignaciones)
+  def cambiar_estado(id, estado) do
+    with {:ok, necesidad} <- GenServer.call(__MODULE__, {:cambiar_estado, id, estado}) do
+      if necesidad.estado == :cancelada, do: Inventario.liberar(necesidad.asignaciones)
       {:ok, necesidad}
     end
   end
+
+  @doc "Cancela la necesidad y devuelve al inventario lo que tenía asignado."
+  @spec cancelar(String.t()) :: {:ok, %Necesidad{}} | {:error, atom()}
+  def cancelar(id), do: cambiar_estado(id, :cancelada)
 
   # ========== Callbacks del servidor ==========
 

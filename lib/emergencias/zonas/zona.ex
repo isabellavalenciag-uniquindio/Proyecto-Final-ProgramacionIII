@@ -73,15 +73,16 @@ defmodule Zona do
   @doc """
   Agrega un nodo bajo el padre indicado, respetando la jerarquía
   (zona → sector → punto) y sin repetir códigos en el árbol.
+  Si el padre no existe, ese error tiene prioridad sobre un código repetido.
   """
   @spec agregar(%__MODULE__{}, String.t(), %__MODULE__{}) :: {:ok, %__MODULE__{}} | {:error, atom()}
   def agregar(%__MODULE__{} = raiz, padre_codigo, %__MODULE__{} = hijo) do
     case {buscar(raiz, hijo.codigo), buscar(raiz, padre_codigo)} do
-      {{:ok, _}, _} ->
-        {:error, :codigo_duplicado}
-
       {_, {:error, :no_existe}} ->
         {:error, :padre_no_existe}
+
+      {{:ok, _}, _} ->
+        {:error, :codigo_duplicado}
 
       {_, {:ok, padre}} ->
         if Map.get(@hijo_de, padre.tipo) == hijo.tipo do

@@ -37,6 +37,12 @@ defmodule ZonasTest do
       assert {:error, :jerarquia_invalida} = Zona.agregar(arbol(), "z1", punto)
       {:ok, repetido} = Zona.nuevo_sector("s1", "Otro", :bajo, 0)
       assert {:error, :codigo_duplicado} = Zona.agregar(arbol(), "z1", repetido)
+    end
+
+    test "el padre inexistente tiene prioridad aunque el código del hijo esté repetido" do
+      {:ok, nuevo} = Zona.nuevo_sector("s9", "Nuevo", :bajo, 0)
+      {:ok, repetido} = Zona.nuevo_sector("s1", "Otro", :bajo, 0)
+      assert {:error, :padre_no_existe} = Zona.agregar(arbol(), "nada", nuevo)
       assert {:error, :padre_no_existe} = Zona.agregar(arbol(), "nada", repetido)
     end
 

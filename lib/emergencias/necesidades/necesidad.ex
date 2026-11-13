@@ -169,7 +169,13 @@ defmodule Necesidad do
     asignaciones =
       n.asignaciones
       |> Enum.map(fn {codigo, ubicacion, cantidad} ->
-        Enum.join([Archivo.sanear_item(codigo), Archivo.sanear_item(ubicacion), cantidad], ":")
+        # Base64 conserva las claves sin confundirlas con los separadores del CSV.
+        Enum.join([
+          "v2",
+          Base.url_encode64(codigo, padding: false),
+          Base.url_encode64(ubicacion, padding: false),
+          cantidad
+        ], ":")
       end)
       |> Archivo.lista_a_texto()
 
@@ -201,11 +207,20 @@ defmodule Necesidad do
       asignaciones:
         asignaciones
         |> Archivo.texto_a_lista()
-        |> Enum.map(fn texto ->
-          [codigo, ubicacion, n] = String.split(texto, ":")
-          {codigo, ubicacion, String.to_integer(n)}
-        end)
+        |> Enum.map(&asignacion_desde_texto/1)
     }
+  end
+
+  defp asignacion_desde_texto(texto) do
+    case String.split(texto, ":") do
+      ["v2", codigo, ubicacion, n] ->
+        {Base.url_decode64!(codigo, padding: false), Base.url_decode64!(ubicacion, padding: false),
+         String.to_integer(n)}
+
+      # Las filas escritas antes de v2 siguen siendo legibles.
+      [codigo, ubicacion, n] ->
+        {codigo, ubicacion, String.to_integer(n)}
+    end
   end
 
   defp a_atomo(texto, validos), do: Enum.find(validos, &(Atom.to_string(&1) == texto))
