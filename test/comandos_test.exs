@@ -179,6 +179,7 @@ defmodule ComandosTest do
     end
 
     test "need_status cancelada devuelve los recursos y no permite devolverlos otra vez", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       sesion = sesion_como("coordinador", ctx.n, ctx.zona)
       {:ok, _} = Inventario.registrar("R#{ctx.n}", "Agua", ctx.categoria, 50, "litros", ctx.ubicacion)
       {:ok, n} = Necesidades.registrar(:agua, 30, :alta, ctx.zona, "", sesion.usuario.usuario)
@@ -233,6 +234,7 @@ defmodule ComandosTest do
     end
 
     test "la salida del albergue actualiza el estado de la persona y su historial", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       sesion = sesion_como("voluntario", ctx.n, ctx.zona)
       documento = "salida#{ctx.n}"
       albergue = "AS#{ctx.n}"
@@ -247,6 +249,7 @@ defmodule ComandosTest do
     end
 
     test "una salida fallida no cambia el estado de la persona", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       sesion = sesion_como("voluntario", ctx.n, ctx.zona)
       documento = "ausente#{ctx.n}"
       albergue = "AS#{ctx.n}"
@@ -258,6 +261,7 @@ defmodule ComandosTest do
     end
 
     test "la salida respeta una reunificación y admite ocupantes sin reporte de persona", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       sesion = sesion_como("voluntario", ctx.n, ctx.zona)
       documento = "reunificada#{ctx.n}"
       sin_reporte = "sin_reporte#{ctx.n}"
@@ -275,6 +279,7 @@ defmodule ComandosTest do
     end
 
     test "reporta una mascota sin nombre y conserva la posición de los demás datos", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       lineas = [
         "connect vacio#{ctx.n} 1234 ciudadano #{ctx.zona}",
         ~s(report_pet found perro "" negro mediano #{ctx.zona} 300)
@@ -295,6 +300,7 @@ defmodule ComandosTest do
     end
 
     test "mascotas: reportar, coincidencias y confirmar", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       voluntario = sesion_como("voluntario", ctx.n, ctx.zona)
       coordinador = sesion_como("coordinador", ctx.n, ctx.zona)
       especie = "especie#{ctx.n}"

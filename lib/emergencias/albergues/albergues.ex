@@ -9,6 +9,7 @@ defmodule Albergues do
   @spec registrar(term(), term(), term(), term()) :: {:ok, map()} | {:error, atom()}
   def registrar(codigo, nombre, zona, capacidad) do
     with {:ok, albergue} <- Albergue.nuevo(codigo, nombre, zona, capacidad),
+         :ok <- Zonas.validar(albergue.zona),
          {:ok, _pid} <- AlbergueSupervisor.iniciar_albergue(albergue) do
       {:ok, Albergue.resumen(albergue)}
     end

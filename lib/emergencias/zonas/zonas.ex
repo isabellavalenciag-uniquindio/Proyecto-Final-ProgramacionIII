@@ -40,6 +40,12 @@ defmodule Zonas do
   @spec existe?(String.t()) :: boolean()
   def existe?(codigo), do: match?({:ok, _}, obtener(codigo))
 
+  @doc "Valida una referencia a una zona registrada."
+  @spec validar(String.t()) :: :ok | {:error, {:zona_inexistente, String.t()}}
+  def validar(codigo) do
+    if existe?(codigo), do: :ok, else: {:error, {:zona_inexistente, codigo}}
+  end
+
   @doc "Lista todas las zonas."
   @spec listar() :: [%Zona{}]
   def listar, do: GenServer.call(__MODULE__, :listar)

@@ -65,9 +65,15 @@ defmodule PersonasTest do
   end
 
   describe "Personas (proceso)" do
-    test "registra y busca por documento, nombre, zona y estado" do
+    setup do
+      zona = "zona#{System.unique_integer([:positive])}"
+      {:ok, _} = Zonas.registrar(zona, "Zona de prueba", :alto)
+      {:ok, zona: zona}
+    end
+
+    test "registra y busca por documento, nombre, zona y estado", ctx do
       d = doc()
-      zona = "zona#{d}"
+      zona = ctx.zona
       {:ok, _} = Personas.reportar(d, "Andrés Gómez", zona, "localizada", 30)
 
       assert [%Persona{documento: ^d}] = Personas.buscar(documento: d)
@@ -76,15 +82,15 @@ defmodule PersonasTest do
       assert [] = Personas.buscar(zona: zona, estado: :reunificada)
     end
 
-    test "no repite documentos" do
+    test "no repite documentos", ctx do
       d = doc()
-      {:ok, _} = Personas.reportar(d, "A", "z", :reportada)
-      assert {:error, :duplicado} = Personas.reportar(d, "B", "z", :reportada)
+      {:ok, _} = Personas.reportar(d, "A", ctx.zona, :reportada)
+      assert {:error, :duplicado} = Personas.reportar(d, "B", ctx.zona, :reportada)
     end
 
-    test "actualiza el estado y conserva el historial" do
+    test "actualiza el estado y conserva el historial", ctx do
       d = doc()
-      {:ok, _} = Personas.reportar(d, "A", "z", :reportada)
+      {:ok, _} = Personas.reportar(d, "A", ctx.zona, :reportada)
       assert {:ok, %Persona{estado: :localizada}} = Personas.actualizar_estado(d, :localizada)
       assert {:ok, [{:localizada, _}, {:reportada, _}]} = Personas.historial(d)
       assert {:error, :no_existe} = Personas.actualizar_estado("no_existe_#{d}", :localizada)
@@ -103,12 +109,12 @@ defmodule PersonasTest do
       assert [%Mensaje{estado: :entregado}, %Mensaje{estado: :pendiente}] = Personas.mensajes(d)
     end
 
-    test "10 reportes simultáneos del mismo documento: solo uno se registra" do
+    test "10 reportes simultáneos del mismo documento: solo uno se registra", ctx do
       d = doc()
 
       resultados =
         1..10
-        |> Enum.map(fn _ -> Task.async(fn -> Personas.reportar(d, "A", "z", :reportada) end) end)
+        |> Enum.map(fn _ -> Task.async(fn -> Personas.reportar(d, "A", ctx.zona, :reportada) end) end)
         |> Task.await_many()
 
       assert Enum.count(resultados, &match?({:ok, _}, &1)) == 1

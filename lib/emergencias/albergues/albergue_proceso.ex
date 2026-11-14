@@ -111,8 +111,26 @@ defmodule AlbergueProceso do
   end
 
   def handle_call({:asociar, tipo, id}, _from, albergue) do
-    responder(Albergue.asociar(albergue, tipo, id), albergue)
+    resultado = with {:ok, id} <- Validacion.texto(id),
+                     :ok <- validar_referencia(tipo, id) do
+      Albergue.asociar(albergue, tipo, id)
+    end
+    responder(resultado, albergue)
   end
+
+  defp validar_referencia(:recurso, id) do
+    if Enum.any?(Inventario.listar(codigo: id), &(&1.codigo == id)),
+      do: :ok, else: {:error, {:recurso_inexistente, id}}
+  end
+
+  defp validar_referencia(:necesidad, id) do
+    case Necesidades.obtener(id) do
+      {:ok, _} -> :ok
+      {:error, :no_existe} -> {:error, {:necesidad_inexistente, id}}
+    end
+  end
+
+  defp validar_referencia(_, _), do: {:error, :tipo_invalido}
 
   # ========== Funciones auxiliares ==========
 

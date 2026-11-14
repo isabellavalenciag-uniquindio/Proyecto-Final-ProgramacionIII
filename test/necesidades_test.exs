@@ -3,6 +3,7 @@ defmodule NecesidadesTest do
 
   setup do
     n = System.unique_integer([:positive])
+    {:ok, _} = Zonas.registrar("zona#{n}", "Zona de prueba", :alto)
     {:ok, zona: "zona#{n}", categoria: "agua#{n}", ubicacion: "centro#{n}", codigo: "R#{n}"}
   end
 

@@ -557,6 +557,8 @@ defmodule Comandos do
   def mensaje_error(:comillas_sin_cerrar), do: "Hay unas comillas sin cerrar."
   def mensaje_error({:filtro_invalido, arg}), do: "Filtro inválido: #{arg}. Use campo=valor."
   def mensaje_error({:zona_inexistente, z}), do: "La zona #{z} no existe. Regístrela con register_zone."
+  def mensaje_error({:recurso_inexistente, id}), do: "El recurso #{id} no existe."
+  def mensaje_error({:necesidad_inexistente, id}), do: "La necesidad #{id} no existe."
   def mensaje_error(:clave_incorrecta), do: "Contraseña incorrecta."
   def mensaje_error(:clave_corta), do: "La contraseña debe tener al menos 4 caracteres."
   def mensaje_error(:usuario_invalido), do: "Nombre de usuario inválido."

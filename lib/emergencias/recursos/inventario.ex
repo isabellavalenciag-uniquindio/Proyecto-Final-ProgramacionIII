@@ -293,7 +293,7 @@ defmodule Inventario do
 
   defp validar_zona(nil), do: :ok
   defp validar_zona(zona) do
-    if Zonas.existe?(zona), do: :ok, else: {:error, {:zona_inexistente, zona}}
+    Zonas.validar(zona)
   end
 
   defp zona_ubicacion(recursos, ubicacion) do

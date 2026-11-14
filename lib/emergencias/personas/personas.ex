@@ -70,6 +70,7 @@ defmodule Personas do
   @impl true
   def handle_call({:reportar, documento, nombre, zona, estado, edad}, _from, estado_proc) do
     with {:ok, persona} <- Persona.nuevo(documento, nombre, zona, estado, edad),
+         :ok <- Zonas.validar(persona.zona),
          false <- Map.has_key?(estado_proc.personas, persona.documento) do
       {:reply, {:ok, persona}, guardar_personas(estado_proc, Map.put(estado_proc.personas, persona.documento, persona))}
     else
