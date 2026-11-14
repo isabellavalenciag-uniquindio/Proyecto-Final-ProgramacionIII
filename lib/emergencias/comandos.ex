@@ -54,7 +54,7 @@ defmodule Comandos do
     update_person: "update_person documento estado",
     send_family_message: "send_family_message documento \"mensaje\"",
     list_family_messages: "list_family_messages documento",
-    mark_message: "mark_message id",
+    mark_message: "mark_message id [pendiente|entregado]",
     report_pet: "report_pet lost|found especie nombre color tamaño zona contacto [caracteristicas]",
     list_pets: "list_pets [especie=.. zona=.. estado=.. tipo=..]",
     match_pets: "match_pets",
@@ -351,9 +351,11 @@ defmodule Comandos do
     {:ok, Reportes.lista(Personas.mensajes(documento), &Reportes.linea_mensaje/1, "No hay mensajes para #{documento}."), sesion}
   end
 
-  defp correr(:mark_message, [id], sesion) do
+  defp correr(:mark_message, [id | resto], sesion) when length(resto) <= 1 do
     case Integer.parse(id) do
-      {n, ""} -> Personas.marcar_entregado(n) |> responder(sesion, &"Mensaje ##{&1.id} marcado como entregado.")
+      {n, ""} when n > 0 ->
+        Personas.marcar_mensaje(n, opcional(resto, :entregado))
+        |> responder(sesion, &"Mensaje ##{&1.id} marcado como #{&1.estado}.")
       _ -> {:error, mensaje_error(:cantidad_invalida), sesion}
     end
   end

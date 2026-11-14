@@ -172,6 +172,19 @@ defmodule ComandosTest do
   end
 
   describe "flujo del enunciado" do
+    test "mark_message permite entregado y pendiente conservando los permisos", ctx do
+      voluntario = sesion_como("voluntario", ctx.n, ctx.zona)
+      ciudadano = sesion_como("ciudadano", ctx.n, ctx.zona)
+      documento = "mensaje#{ctx.n}"
+      {:ok, m} = Personas.enviar_mensaje("ana", documento, "Hola")
+      assert {:error, _, _} = Emergencias.ejecutar("mark_message #{m.id}", ciudadano)
+      assert {:ok, _, _} = Emergencias.ejecutar("mark_message #{m.id}", voluntario)
+      assert {:ok, texto, _} = Emergencias.ejecutar("mark_message #{m.id} pendiente", voluntario)
+      assert texto =~ "pendiente"
+      assert {:error, _, _} = Emergencias.ejecutar("mark_message #{m.id} cancelado", voluntario)
+      assert [%Mensaje{estado: :pendiente}] = Personas.mensajes(documento)
+    end
+
     test "necesidad, recurso, asignación y resumen", ctx do
       sesion = sesion_como("coordinador", ctx.n, ctx.zona)
 

@@ -37,8 +37,19 @@ defmodule Mensaje do
 
   @doc "Marca el mensaje como entregado. No se puede entregar dos veces."
   @spec marcar_entregado(%__MODULE__{}) :: {:ok, %__MODULE__{}} | {:error, :ya_entregado}
-  def marcar_entregado(%__MODULE__{estado: :pendiente} = m), do: {:ok, %{m | estado: :entregado}}
-  def marcar_entregado(%__MODULE__{estado: :entregado}), do: {:error, :ya_entregado}
+  def marcar_entregado(%__MODULE__{} = m), do: cambiar_estado(m, :entregado)
+
+  @doc "Marca explícitamente un mensaje como pendiente o entregado."
+  @spec cambiar_estado(%__MODULE__{}, term()) :: {:ok, %__MODULE__{}} | {:error, atom()}
+  def cambiar_estado(%__MODULE__{} = m, estado) do
+    with {:ok, estado} <- Validacion.atomo(estado, [:pendiente, :entregado], :estado_invalido) do
+      cond do
+        estado == :entregado and m.estado == :entregado -> {:error, :ya_entregado}
+        estado == m.estado -> {:error, :mismo_estado}
+        true -> {:ok, %{m | estado: estado}}
+      end
+    end
+  end
 
   defp validar_contenido(contenido) do
     with {:ok, texto} <- Validacion.texto(contenido) do
