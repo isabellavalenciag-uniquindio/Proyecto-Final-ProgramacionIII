@@ -69,7 +69,12 @@ defmodule AlbergueProceso do
   end
 
   defp verificar_otro_albergue(codigo, documento) do
-    ocupado = Enum.any?(codigos(), fn otro ->
+    # Las copias guardadas cubren el intervalo en que otro albergue se reinicia.
+    guardado = Persistencia.cargar(:albergues)
+      |> Enum.map(&Albergue.desde_fila/1)
+      |> Enum.any?(fn a -> a.codigo != codigo and MapSet.member?(a.ocupantes, documento) end)
+
+    ocupado = guardado or Enum.any?(codigos(), fn otro ->
       otro != codigo and
         case consultar(otro) do
           {:ok, albergue} -> MapSet.member?(albergue.ocupantes, documento)
@@ -88,6 +93,10 @@ defmodule AlbergueProceso do
       [] -> {:error, :no_existe}
       [_ | _] -> GenServer.call(via(codigo), mensaje)
     end
+  rescue
+    ArgumentError -> {:error, :no_disponible}
+  catch
+    :exit, _ -> {:error, :no_disponible}
   end
 
   # ========== Callbacks del servidor ==========

@@ -565,6 +565,7 @@ defmodule Comandos do
   def mensaje_error(:duplicado), do: "Ya existe un registro con ese identificador."
   def mensaje_error(:codigo_duplicado), do: "Ese código ya existe en la zona."
   def mensaje_error(:no_existe), do: "No se encontró lo que busca."
+  def mensaje_error(:no_disponible), do: "El albergue se está recuperando. Intente nuevamente."
   def mensaje_error(:padre_no_existe), do: "El elemento superior (zona o sector) no existe."
   def mensaje_error(:jerarquia_invalida), do: "Esa jerarquía no es válida (zona → sector → punto)."
   def mensaje_error(:insuficiente), do: "No hay existencias suficientes."

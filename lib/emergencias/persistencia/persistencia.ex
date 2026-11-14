@@ -6,7 +6,8 @@ defmodule Persistencia do
   atienden una por una, así dos procesos nunca escriben el mismo archivo a la
   vez. Los demás GenServer cargan su estado de aquí en `init/1` (por eso un
   proceso reiniciado por su supervisor recupera sus datos) y guardan tras
-  cada cambio.
+  cada cambio. Una copia en memoria permite también recuperar procesos
+  cuando se desactiva la escritura en disco para las pruebas.
   """
   use GenServer
   require Logger
@@ -40,20 +41,24 @@ defmodule Persistencia do
 
   @impl true
   def handle_call({:cargar, entidad}, _from, estado) do
-    {:reply, Archivo.leer(entidad), estado}
+    filas = Map.get_lazy(estado, entidad, fn -> Archivo.leer(entidad) end)
+    {:reply, filas, Map.put(estado, entidad, filas)}
   end
 
   def handle_call(:sincronizar, _from, estado), do: {:reply, :ok, estado}
 
   @impl true
   def handle_cast({:guardar, entidad, filas}, estado) do
+    filas = Enum.map(filas, fn fila -> Enum.map(fila, &to_string/1) end)
     entidad |> Archivo.escribir(filas) |> registrar_error(entidad)
-    {:noreply, estado}
+    {:noreply, Map.put(estado, entidad, filas)}
   end
 
   def handle_cast({:guardar_fila, entidad, fila}, estado) do
-    entidad |> Archivo.guardar_fila(fila) |> registrar_error(entidad)
-    {:noreply, estado}
+    anteriores = Map.get_lazy(estado, entidad, fn -> Archivo.leer(entidad) end)
+    filas = Archivo.upsert(anteriores, Enum.map(fila, &to_string/1))
+    entidad |> Archivo.escribir(filas) |> registrar_error(entidad)
+    {:noreply, Map.put(estado, entidad, filas)}
   end
 
   defp registrar_error(:ok, _entidad), do: :ok

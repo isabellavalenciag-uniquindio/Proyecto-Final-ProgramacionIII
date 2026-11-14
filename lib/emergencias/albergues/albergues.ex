@@ -15,12 +15,18 @@ defmodule Albergues do
     end
   end
 
-  @doc "Recrea los procesos de los albergues guardados. Se llama al iniciar la aplicación."
-  @spec cargar() :: :ok
+  @doc "Recrea los albergues al arrancar o recuperar su árbol de supervisión."
+  @spec cargar() :: :ok | {:error, term()}
   def cargar do
     :albergues
     |> Persistencia.cargar()
-    |> Enum.each(fn fila -> fila |> Albergue.desde_fila() |> AlbergueSupervisor.iniciar_albergue() end)
+    |> Enum.reduce_while(:ok, fn fila, :ok ->
+      case fila |> Albergue.desde_fila() |> AlbergueSupervisor.iniciar_albergue() do
+        {:ok, _} -> {:cont, :ok}
+        {:error, :duplicado} -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
   end
 
   @doc "Registra el ingreso de una persona (por documento)."

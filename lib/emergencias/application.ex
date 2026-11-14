@@ -6,11 +6,13 @@ defmodule Emergencias.Application do
 
       Emergencias.Supervisor (:one_for_one)
       ├── Persistencia            (GenServer: serializa escrituras a archivos)
-      ├── Registry                (nombres de los procesos de albergue)
       ├── Zonas                   (GenServer)
       ├── Inventario              (GenServer único: evita la sobreasignación)
       ├── Necesidades             (GenServer)
-      ├── AlbergueSupervisor      (DynamicSupervisor: un proceso por albergue)
+      ├── AlberguesSupervisor (:rest_for_one)
+      │   ├── Registry            (nombres de los procesos de albergue)
+      │   ├── AlbergueSupervisor  (DynamicSupervisor: un proceso por albergue)
+      │   └── AlbergueRecuperador (reconstruye los albergues)
       ├── Task.Supervisor         (tareas paralelas)
       └── Usuarios, Personas, Mascotas   (parte B, se inician si existen)
 
@@ -28,19 +30,14 @@ defmodule Emergencias.Application do
     hijos =
       [
         Persistencia,
-        {Registry, keys: :unique, name: Emergencias.RegistroAlbergues},
         Zonas,
         Inventario,
         Necesidades,
-        AlbergueSupervisor,
+        AlberguesSupervisor,
         {Task.Supervisor, name: Emergencias.TareasSupervisor}
       ] ++ hijos_b()
 
-    resultado = Supervisor.start_link(hijos, strategy: :one_for_one, name: Emergencias.Supervisor)
-
-    # Los albergues son procesos dinámicos: se recrean desde el archivo
-    Albergues.cargar()
-    resultado
+    Supervisor.start_link(hijos, strategy: :one_for_one, name: Emergencias.Supervisor)
   end
 
   defp hijos_b do
