@@ -51,8 +51,8 @@ defmodule Inventario do
 
   Devuelve `{:ok, detalle}` o `{:error, :insuficiente}`.
   """
-  @spec reservar(String.t(), term()) :: {:ok, [{String.t(), String.t(), pos_integer()}]} | {:error, atom()}
-  def reservar(clave, cantidad), do: GenServer.call(__MODULE__, {:reservar, clave, cantidad})
+  @spec reservar(String.t(), term(), atom() | nil) :: {:ok, [{String.t(), String.t(), pos_integer()}]} | {:error, atom()}
+  def reservar(clave, cantidad, tipo \\ nil), do: GenServer.call(__MODULE__, {:reservar, clave, cantidad, tipo})
 
   @doc "Devuelve al inventario lo que entregó `reservar/2`."
   @spec liberar([{String.t(), String.t(), pos_integer()}]) :: :ok
@@ -119,9 +119,10 @@ defmodule Inventario do
     end
   end
 
-  def handle_call({:reservar, clave, cantidad}, _from, recursos) do
+  def handle_call({:reservar, clave, cantidad, tipo}, _from, recursos) do
     with {:ok, cantidad} <- Validacion.entero_positivo(cantidad),
          candidatos = candidatos(recursos, clave),
+         {:ok, candidatos} <- compatibles(candidatos, tipo),
          {:ok, detalle} <- tomar(candidatos, cantidad, []) do
       nuevos =
         Enum.reduce(detalle, recursos, fn {codigo, ubicacion, n}, acc ->
@@ -234,6 +235,17 @@ defmodule Inventario do
   defp tomar([recurso | resto], faltante, acumulado) do
     n = min(recurso.cantidad, faltante)
     tomar(resto, faltante - n, [{recurso.codigo, recurso.ubicacion, n} | acumulado])
+  end
+
+  defp compatibles(candidatos, nil), do: {:ok, candidatos}
+
+  defp compatibles(candidatos, tipo) do
+    with {:ok, tipo} <- Validacion.atomo(tipo, Necesidad.tipos(), :tipo_invalido) do
+      case Enum.filter(candidatos, &Recurso.compatible?(&1, tipo)) do
+        [] when candidatos != [] -> {:error, :recurso_incompatible}
+        lista -> {:ok, lista}
+      end
+    end
   end
 
   defp distintos(a, b) when a == b, do: {:error, :mismo_lugar}

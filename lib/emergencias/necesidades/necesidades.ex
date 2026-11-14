@@ -56,7 +56,7 @@ defmodule Necesidades do
     with {:ok, cantidad} <- Validacion.entero_positivo(cantidad),
          {:ok, necesidad} <- obtener(id),
          :ok <- verificar_asignable(necesidad, cantidad),
-         {:ok, detalle} <- Inventario.reservar(clave_recurso, cantidad) do
+         {:ok, detalle} <- Inventario.reservar(clave_recurso, cantidad, necesidad.tipo) do
       case GenServer.call(__MODULE__, {:registrar_asignacion, id, detalle}) do
         {:ok, _} = ok ->
           ok

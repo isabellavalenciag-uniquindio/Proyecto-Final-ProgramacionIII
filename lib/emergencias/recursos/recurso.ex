@@ -65,6 +65,19 @@ defmodule Recurso do
     Validacion.coincide?(r.codigo, clave) or Validacion.coincide?(r.categoria, clave)
   end
 
+  @doc """
+  Comprueba el tipo de ayuda que puede cubrir el recurso. Una categoría de
+  necesidad conocida tiene prioridad; para categorías personalizadas se usa
+  el nombre del recurso (por ejemplo, Agua en la categoría agua_potable).
+  """
+  @spec compatible?(%__MODULE__{}, atom()) :: boolean()
+  def compatible?(%__MODULE__{} = r, tipo) do
+    case Validacion.atomo(r.categoria, Necesidad.tipos()) do
+      {:ok, categoria} -> categoria == tipo
+      {:error, _} -> Validacion.coincide?(r.nombre, tipo)
+    end
+  end
+
   @doc "Suma unidades al recurso. Rechaza cantidades que no sean positivas."
   @spec sumar(%__MODULE__{}, term(), atom()) :: {:ok, %__MODULE__{}} | {:error, atom()}
   def sumar(%__MODULE__{} = r, n, tipo \\ :entrada) when tipo in @tipos_movimiento do

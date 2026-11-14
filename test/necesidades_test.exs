@@ -67,6 +67,31 @@ defmodule NecesidadesTest do
   end
 
   describe "Necesidades (proceso)" do
+    test "rechaza medicamentos para agua sin descontar ni completar la solicitud", ctx do
+      {:ok, _} = Inventario.registrar(ctx.codigo, "Medicamentos", "medicamentos", 20, "cajas", ctx.ubicacion)
+      {:ok, n} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
+      assert {:error, :recurso_incompatible} = Necesidades.asignar(n.id, ctx.codigo, 10)
+      assert {:ok, ^n} = Necesidades.obtener(n.id)
+      assert Inventario.disponibilidad(ctx.codigo) == 20
+    end
+
+    test "una categoría conocida prevalece sobre un nombre contradictorio", ctx do
+      {:ok, _} = Inventario.registrar(ctx.codigo, "Agua", "medicamentos", 20, "cajas", ctx.ubicacion)
+      {:ok, n} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
+      assert {:error, :recurso_incompatible} = Necesidades.asignar(n.id, ctx.codigo, 10)
+      assert Inventario.disponibilidad(ctx.codigo) == 20
+    end
+
+    test "una reserva por categoría no mezcla recursos incompatibles", ctx do
+      stock(ctx, 5)
+      {:ok, _} = Inventario.registrar(ctx.codigo <> "M", "Medicamentos", ctx.categoria, 20, "cajas", ctx.ubicacion)
+      {:ok, n} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
+      assert {:error, :insuficiente} = Necesidades.asignar(n.id, ctx.categoria, 10)
+      assert Inventario.disponibilidad(ctx.categoria) == 25
+      assert {:ok, %{estado: :pendiente}} = Necesidades.asignar(n.id, ctx.categoria, 5)
+      assert Inventario.disponibilidad(ctx.categoria) == 20
+    end
+
     test "un cambio manual no completa una necesidad ni modifica sus reservas", ctx do
       {:ok, n} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
       assert {:error, :recursos_incompletos} = Necesidades.cambiar_estado(n.id, :asignada)
