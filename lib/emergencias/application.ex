@@ -14,7 +14,10 @@ defmodule Emergencias.Application do
       │   ├── AlbergueSupervisor  (DynamicSupervisor: un proceso por albergue)
       │   └── AlbergueRecuperador (reconstruye los albergues)
       ├── Task.Supervisor         (tareas paralelas)
-      └── Usuarios, Personas, Mascotas   (parte B, se inician si existen)
+      ├── Usuarios, Personas, Mascotas   (se inician si existen)
+      ├── Phoenix.PubSub                (actualizaciones entre interfaces)
+      ├── Emergencias.SesionesWeb       (accesos del navegador)
+      └── EmergenciasWeb.Endpoint       (servidor HTTP y LiveView)
 
   `Persistencia` va primero porque los demás procesos leen sus datos de allí
   en `init/1`.
@@ -35,9 +38,19 @@ defmodule Emergencias.Application do
         Necesidades,
         AlberguesSupervisor,
         {Task.Supervisor, name: Emergencias.TareasSupervisor}
-      ] ++ hijos_b()
+      ] ++ hijos_b() ++ [
+        {Phoenix.PubSub, name: Emergencias.PubSub},
+        Emergencias.SesionesWeb,
+        EmergenciasWeb.Endpoint
+      ]
 
     Supervisor.start_link(hijos, strategy: :one_for_one, name: Emergencias.Supervisor)
+  end
+
+  @impl true
+  def config_change(changed, _new, removed) do
+    EmergenciasWeb.Endpoint.config_change(changed, removed)
+    :ok
   end
 
   defp hijos_b do

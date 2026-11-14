@@ -101,14 +101,37 @@ defmodule Comandos do
         {:ok, "", sesion}
 
       [nombre | args] ->
-        with {:ok, comando} <- buscar_comando(nombre),
-             :ok <- autorizar(comando, sesion) do
-          {estado, texto, nueva} = correr(comando, args, sesion)
-          anotar_actividad(comando, linea, sesion, nueva, estado)
-          {estado, texto, nueva}
-        else
-          {:error, razon} -> {:error, mensaje_error(razon), sesion}
-        end
+        procesar(nombre, args, sesion, linea)
+    end
+  end
+
+  @doc """
+  Ejecuta una operación con argumentos separados. La web comparte aquí las
+  sesiones, permisos, reglas y actividad de la consola sin construir comandos
+  a partir del texto escrito en los formularios.
+  """
+  @spec ejecutar_operacion(atom() | String.t(), [String.t()], map()) ::
+          {:ok | :error | :salir, String.t(), map()}
+  def ejecutar_operacion(nombre, args, sesion) when is_list(args) do
+    sesion = actualizar_sesion(sesion)
+    if (is_atom(nombre) or is_binary(nombre)) and Enum.all?(args, &is_binary/1) do
+      linea = Enum.map_join([to_string(nombre) | args], " ", &inspect/1)
+      procesar(to_string(nombre), args, sesion, linea)
+    else
+      {:error, mensaje_error(:tipo_invalido), sesion}
+    end
+  end
+
+  def ejecutar_operacion(_, _, sesion), do: {:error, mensaje_error(:tipo_invalido), sesion}
+
+  defp procesar(nombre, args, sesion, linea) do
+    with {:ok, comando} <- buscar_comando(nombre),
+         :ok <- autorizar(comando, sesion) do
+      {estado, texto, nueva} = correr(comando, args, sesion)
+      anotar_actividad(comando, linea, sesion, nueva, estado)
+      {estado, texto, nueva}
+    else
+      {:error, razon} -> {:error, mensaje_error(razon), sesion}
     end
   end
 

@@ -1,0 +1,9 @@
+/_build/
+/deps/
+/cover/
+/priv/static/assets/vendor/
+/data/**/*.csv
+/data/**/*.tmp
+/erl_crash.dump
+/.elixir_ls/
+/.expert/

@@ -37,7 +37,11 @@ defmodule Usuarios do
 
   @doc "Desconecta una sesión, o todas las del usuario si no se indica una."
   @spec desconectar(String.t(), reference() | :todas) :: :ok | {:error, :no_conectado}
-  def desconectar(usuario, sesion_id \\ :todas), do: GenServer.call(__MODULE__, {:desconectar, usuario, sesion_id})
+  def desconectar(usuario, sesion_id \\ :todas) do
+    resultado = GenServer.call(__MODULE__, {:desconectar, usuario, sesion_id})
+    if resultado == :ok, do: Emergencias.Eventos.notificar(:sesiones)
+    resultado
+  end
 
   @doc "Valida una sesión en memoria y devuelve los datos actuales del usuario."
   @spec validar_sesion(map()) :: {:ok, map()} | {:error, :sin_sesion}

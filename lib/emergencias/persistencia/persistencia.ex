@@ -51,6 +51,7 @@ defmodule Persistencia do
   def handle_cast({:guardar, entidad, filas}, estado) do
     filas = Enum.map(filas, fn fila -> Enum.map(fila, &to_string/1) end)
     entidad |> Archivo.escribir(filas) |> registrar_error(entidad)
+    Emergencias.Eventos.notificar(entidad)
     {:noreply, Map.put(estado, entidad, filas)}
   end
 
@@ -58,6 +59,7 @@ defmodule Persistencia do
     anteriores = Map.get_lazy(estado, entidad, fn -> Archivo.leer(entidad) end)
     filas = Archivo.upsert(anteriores, Enum.map(fila, &to_string/1))
     entidad |> Archivo.escribir(filas) |> registrar_error(entidad)
+    Emergencias.Eventos.notificar(entidad)
     {:noreply, Map.put(estado, entidad, filas)}
   end
 
