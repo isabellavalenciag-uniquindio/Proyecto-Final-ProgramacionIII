@@ -31,10 +31,54 @@ defmodule AlbergueProceso do
   def consultar(codigo), do: llamar(codigo, :consultar)
 
   @spec ingresar(String.t(), term()) :: {:ok, map()} | {:error, atom()}
-  def ingresar(codigo, documento), do: llamar(codigo, {:ingresar, documento})
+  def ingresar(codigo, documento) do
+    con_documento(documento, fn documento ->
+      with {:ok, _} <- consultar(codigo),
+           :ok <- verificar_otro_albergue(codigo, documento),
+           {:ok, resumen} <- llamar(codigo, {:ingresar, documento}) do
+        case Personas.actualizar_estado(documento, :en_albergue) do
+          {:ok, _} -> {:ok, resumen}
+          {:error, razon} when razon in [:no_existe, :mismo_estado] -> {:ok, resumen}
+          {:error, _} = error ->
+            llamar(codigo, {:salir, documento})
+            error
+        end
+      end
+    end)
+  end
 
   @spec salir(String.t(), term()) :: {:ok, map()} | {:error, atom()}
-  def salir(codigo, documento), do: llamar(codigo, {:salir, documento})
+  def salir(codigo, documento) do
+    con_documento(documento, fn documento ->
+      with {:ok, resumen} <- llamar(codigo, {:salir, documento}) do
+        case Personas.obtener(documento) do
+          {:ok, %Persona{estado: :en_albergue}} -> Personas.actualizar_estado(documento, :trasladada)
+          _ -> :ok
+        end
+        {:ok, resumen}
+      end
+    end)
+  end
+
+  # El bloqueo pertenece al solicitante y solo serializa operaciones sobre
+  # la misma persona. Personas distintas pueden operar en paralelo.
+  defp con_documento(documento, funcion) do
+    with {:ok, documento} <- Validacion.texto(documento) do
+      :global.trans({{__MODULE__, documento}, self()}, fn -> funcion.(documento) end, [node()])
+    end
+  end
+
+  defp verificar_otro_albergue(codigo, documento) do
+    ocupado = Enum.any?(codigos(), fn otro ->
+      otro != codigo and
+        case consultar(otro) do
+          {:ok, albergue} -> MapSet.member?(albergue.ocupantes, documento)
+          _ -> false
+        end
+    end)
+
+    if ocupado, do: {:error, :en_otro_albergue}, else: :ok
+  end
 
   @spec asociar(String.t(), :recurso | :necesidad, String.t()) :: {:ok, map()} | {:error, atom()}
   def asociar(codigo, tipo, id), do: llamar(codigo, {:asociar, tipo, id})

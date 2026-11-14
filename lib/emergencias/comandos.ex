@@ -426,24 +426,12 @@ defmodule Comandos do
   end
 
   defp correr(:register_entry, [codigo, documento], sesion) do
-    with {:ok, resumen} <- Albergues.ingresar(codigo, documento) do
-      # Si la persona estaba registrada, pasa a "en albergue" (si la transición es válida)
-      _ = Personas.actualizar_estado(documento, :en_albergue)
-      {:ok, resumen}
-    end
+    Albergues.ingresar(codigo, documento)
     |> responder(sesion, &"Ingreso registrado. Ocupación #{&1.ocupacion}/#{&1.capacidad} (#{&1.cupos} cupos).")
   end
 
   defp correr(:register_exit, [codigo, documento], sesion) do
-    with {:ok, resumen} <- Albergues.salir(codigo, documento) do
-      # Solo cambia a quien aún figura en albergue; respeta los estados posteriores.
-      case Personas.obtener(documento) do
-        {:ok, %Persona{estado: :en_albergue}} -> Personas.actualizar_estado(documento, :trasladada)
-        _ -> :ok
-      end
-
-      {:ok, resumen}
-    end
+    Albergues.salir(codigo, documento)
     |> responder(sesion, &"Salida registrada. Ocupación #{&1.ocupacion}/#{&1.capacidad} (#{&1.cupos} cupos).")
   end
 
@@ -601,6 +589,7 @@ defmodule Comandos do
   def mensaje_error(:mensaje_largo), do: "El mensaje es demasiado largo (máximo 500 caracteres)."
   def mensaje_error(:sin_cupo), do: "El albergue no tiene cupos disponibles."
   def mensaje_error(:ya_registrado), do: "Esa persona ya está en el albergue."
+  def mensaje_error(:en_otro_albergue), do: "Esa persona ya ocupa otro albergue; primero debe registrar su salida."
   def mensaje_error(:no_esta), do: "Esa persona no está en el albergue."
   def mensaje_error(:no_conectado), do: "El usuario no estaba conectado."
   def mensaje_error(otro), do: "Error: #{inspect(otro)}"
