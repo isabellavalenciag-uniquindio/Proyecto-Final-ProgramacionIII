@@ -42,13 +42,13 @@ defmodule Comandos do
     pending_needs: "pending_needs",
     need_status: "need_status id estado",
     cancel_need: "cancel_need id",
-    register_resource: "register_resource codigo nombre cantidad unidad ubicacion [categoria]",
+    register_resource: "register_resource codigo nombre cantidad unidad ubicacion [categoria] [zona]",
     resource_in: "resource_in codigo ubicacion cantidad",
     resource_out: "resource_out codigo ubicacion cantidad",
-    list_resources: "list_resources [categoria=.. ubicacion=.. codigo=..]",
+    list_resources: "list_resources [categoria=.. ubicacion=.. codigo=.. zona=..]",
     critical_resources: "critical_resources [umbral]",
     assign_resource: "assign_resource id_necesidad recurso cantidad",
-    transfer_resource: "transfer_resource codigo origen destino cantidad",
+    transfer_resource: "transfer_resource codigo origen destino cantidad [zona_destino]",
     report_person: "report_person documento nombre zona estado [edad]",
     find_person: "find_person documento | find_person [nombre=.. zona=.. estado=..]",
     update_person: "update_person documento estado",
@@ -268,8 +268,9 @@ defmodule Comandos do
   # ---- Recursos ----
 
   defp correr(:register_resource, [codigo, nombre, cantidad, unidad, ubicacion | resto], sesion)
-       when length(resto) <= 1 do
-    Inventario.registrar(codigo, nombre, opcional(resto, nombre), cantidad, unidad, ubicacion)
+       when length(resto) <= 2 do
+    zona = Enum.at(resto, 1, sesion.usuario.zona)
+    Inventario.registrar(codigo, nombre, opcional(resto, nombre), cantidad, unidad, ubicacion, zona)
     |> responder(sesion, &"Recurso #{&1.codigo} registrado: #{&1.cantidad} #{&1.unidad} en #{&1.ubicacion}.")
   end
 
@@ -284,7 +285,7 @@ defmodule Comandos do
   end
 
   defp correr(:list_resources, args, sesion) do
-    case filtros(args) do
+    case filtros(args, [:categoria, :ubicacion, :codigo, :zona]) do
       {:ok, filtros} ->
         {:ok, Reportes.lista(Inventario.listar(filtros), &Reportes.linea_recurso/1, "No hay recursos."), sesion}
 
@@ -307,8 +308,8 @@ defmodule Comandos do
     end)
   end
 
-  defp correr(:transfer_resource, [codigo, origen, destino, cantidad], sesion) do
-    Inventario.transferir(codigo, origen, destino, cantidad)
+  defp correr(:transfer_resource, [codigo, origen, destino, cantidad | resto], sesion) when length(resto) <= 1 do
+    Inventario.transferir(codigo, origen, destino, cantidad, List.first(resto))
     |> responder(sesion, fn %{origen: o, destino: d} ->
       "Transferencia hecha. #{o.ubicacion}: #{o.cantidad} #{o.unidad}; #{d.ubicacion}: #{d.cantidad} #{d.unidad}."
     end)
@@ -499,10 +500,10 @@ defmodule Comandos do
   end
 
   # "zona=centro prioridad=critica" -> [zona: "centro", prioridad: "critica"]
-  defp filtros(args) do
+  defp filtros(args, permitidos \\ @filtros) do
     Enum.reduce_while(args, {:ok, []}, fn arg, {:ok, acumulado} ->
       with [clave, valor] <- String.split(arg, "=", parts: 2),
-           campo when not is_nil(campo) <- Enum.find(@filtros, &(Atom.to_string(&1) == Validacion.normalizar(clave))) do
+           campo when not is_nil(campo) <- Enum.find(permitidos, &(Atom.to_string(&1) == Validacion.normalizar(clave))) do
         {:cont, {:ok, acumulado ++ [{campo, valor}]}}
       else
         _ -> {:halt, {:error, {:filtro_invalido, arg}}}
@@ -582,6 +583,7 @@ defmodule Comandos do
   def mensaje_error(:recurso_incompatible), do: "El recurso no corresponde al tipo de necesidad."
   def mensaje_error(:cantidad_invalida), do: "La cantidad o el número no es válido (debe ser un entero positivo)."
   def mensaje_error(:mismo_lugar), do: "El origen y el destino son el mismo lugar."
+  def mensaje_error(:zona_destino_distinta), do: "La zona indicada no corresponde al recurso del destino."
   def mensaje_error(:texto_vacio), do: "Falta un dato obligatorio."
   def mensaje_error(:tipo_invalido), do: "El tipo indicado no es válido."
   def mensaje_error(:prioridad_invalida), do: "Prioridad inválida (critica, alta, media o baja)."

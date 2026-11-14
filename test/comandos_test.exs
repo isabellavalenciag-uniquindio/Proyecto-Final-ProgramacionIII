@@ -126,6 +126,16 @@ defmodule ComandosTest do
   end
 
   describe "validación de argumentos" do
+    test "los recursos se filtran por zona y rechazan filtros ajenos", ctx do
+      sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _} = Zonas.registrar(ctx.zona, "Centro", :alto)
+      assert {:ok, _, _} = Emergencias.ejecutar("register_resource R#{ctx.n} agua 10 litros #{ctx.ubicacion}", sesion)
+      assert {:ok, texto, _} = Emergencias.ejecutar("list_resources zona=#{ctx.zona}", sesion)
+      assert texto =~ "R#{ctx.n}"
+      assert {:ok, "No hay recursos.", _} = Emergencias.ejecutar("list_resources zona=fantasma", sesion)
+      assert {:error, _, _} = Emergencias.ejecutar("list_resources estado=pendiente", sesion)
+    end
+
     test "muestra el uso cuando faltan argumentos", ctx do
       sesion = sesion_como("coordinador", ctx.n, ctx.zona)
       assert {:error, "Uso: " <> uso, _} = Emergencias.ejecutar("assign_resource N001", sesion)
@@ -306,6 +316,7 @@ defmodule ComandosTest do
 
     test "transferencias entre centros", ctx do
       sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _} = Zonas.registrar(ctx.zona, "Centro", :alto)
       {:ok, _, _} = Emergencias.ejecutar("register_resource R#{ctx.n} agua 200 litros #{ctx.ubicacion} #{ctx.categoria}", sesion)
       {:ok, texto, _} = Emergencias.ejecutar("transfer_resource R#{ctx.n} #{ctx.ubicacion} albergue_#{ctx.n} 30", sesion)
       assert texto =~ "170"

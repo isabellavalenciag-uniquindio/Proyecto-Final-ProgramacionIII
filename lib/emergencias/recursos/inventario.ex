@@ -28,10 +28,10 @@ defmodule Inventario do
   end
 
   @doc "Registra un recurso nuevo. Error `:duplicado` si ya existe ese código en ese lugar."
-  @spec registrar(term(), term(), term(), term(), term(), term()) ::
+  @spec registrar(term(), term(), term(), term(), term(), term(), term()) ::
           {:ok, %Recurso{}} | {:error, atom()}
-  def registrar(codigo, nombre, categoria, cantidad, unidad, ubicacion) do
-    GenServer.call(__MODULE__, {:registrar, {codigo, nombre, categoria, cantidad, unidad, ubicacion}})
+  def registrar(codigo, nombre, categoria, cantidad, unidad, ubicacion, zona \\ nil) do
+    GenServer.call(__MODULE__, {:registrar, {codigo, nombre, categoria, cantidad, unidad, ubicacion, zona}})
   end
 
   @doc "Registra una entrada de inventario."
@@ -59,23 +59,24 @@ defmodule Inventario do
   def liberar(detalle), do: GenServer.call(__MODULE__, {:liberar, detalle})
 
   @doc "Transfiere unidades entre dos lugares. Crea el recurso en el destino si no existe."
-  @spec transferir(String.t(), String.t(), String.t(), term()) :: {:ok, map()} | {:error, atom()}
-  def transferir(codigo, origen, destino, cantidad) do
-    GenServer.call(__MODULE__, {:transferir, codigo, origen, destino, cantidad})
+  @spec transferir(String.t(), String.t(), String.t(), term(), String.t() | nil) :: {:ok, map()} | {:error, atom()}
+  def transferir(codigo, origen, destino, cantidad, zona_destino \\ nil) do
+    zona_destino = zona_destino || zona_albergue(destino)
+    GenServer.call(__MODULE__, {:transferir, codigo, origen, destino, cantidad, zona_destino})
   end
 
   @doc "Busca un recurso por código y lugar."
   @spec obtener(String.t(), String.t()) :: {:ok, %Recurso{}} | {:error, :no_existe}
   def obtener(codigo, ubicacion), do: GenServer.call(__MODULE__, {:obtener, codigo, ubicacion})
 
-  @doc "Lista recursos. Filtros opcionales: `categoria:`, `ubicacion:`, `codigo:`."
+  @doc "Lista recursos. Filtros opcionales: `categoria:`, `ubicacion:`, `codigo:`, `zona:`."
   @spec listar(keyword()) :: [%Recurso{}]
   def listar(filtros \\ []), do: GenServer.call(__MODULE__, {:listar, filtros})
 
-  @doc "Total disponible de un código o categoría, opcionalmente en un lugar."
-  @spec disponibilidad(String.t(), String.t() | nil) :: non_neg_integer()
-  def disponibilidad(clave, ubicacion \\ nil) do
-    GenServer.call(__MODULE__, {:disponibilidad, clave, ubicacion})
+  @doc "Total disponible de un código o categoría, opcionalmente por ubicación y zona."
+  @spec disponibilidad(String.t(), String.t() | nil, String.t() | nil) :: non_neg_integer()
+  def disponibilidad(clave, ubicacion \\ nil, zona \\ nil) do
+    GenServer.call(__MODULE__, {:disponibilidad, clave, ubicacion, zona})
   end
 
   @doc "Recursos con existencias iguales o menores al umbral, de menor a mayor."
@@ -96,8 +97,8 @@ defmodule Inventario do
   end
 
   @impl true
-  def handle_call({:registrar, {codigo, nombre, categoria, cantidad, unidad, ubicacion}}, _from, recursos) do
-    case Recurso.nuevo(codigo, nombre, categoria, cantidad, unidad, ubicacion) do
+  def handle_call({:registrar, {codigo, nombre, categoria, cantidad, unidad, ubicacion, zona}}, _from, recursos) do
+    case crear_recurso(codigo, nombre, categoria, cantidad, unidad, ubicacion, zona) do
       {:ok, recurso} ->
         if Map.has_key?(recursos, Recurso.clave(recurso)) do
           {:reply, {:error, :duplicado}, recursos}
@@ -152,14 +153,15 @@ defmodule Inventario do
     {:reply, :ok, guardar(nuevos)}
   end
 
-  def handle_call({:transferir, codigo, origen, destino, cantidad}, _from, recursos) do
+  def handle_call({:transferir, codigo, origen, destino, cantidad, zona_destino}, _from, recursos) do
     with {:ok, codigo} <- Validacion.texto(codigo),
          {:ok, origen} <- Validacion.texto(origen),
          {:ok, destino} <- Validacion.texto(destino),
+         :ok <- validar_zona(zona_destino),
          :ok <- distintos(origen, destino),
          {:ok, desde} <- buscar(recursos, codigo, origen),
          {:ok, desde_nuevo} <- Recurso.restar(desde, cantidad, :transferencia_salida),
-         {:ok, hacia_nuevo} <- recibir(recursos, desde, destino, cantidad) do
+         {:ok, hacia_nuevo} <- recibir(recursos, desde, destino, cantidad, zona_destino) do
       nuevos =
         recursos
         |> Map.put(Recurso.clave(desde_nuevo), desde_nuevo)
@@ -185,12 +187,14 @@ defmodule Inventario do
     {:reply, lista, recursos}
   end
 
-  def handle_call({:disponibilidad, clave, ubicacion}, _from, recursos) do
+  def handle_call({:disponibilidad, clave, ubicacion, zona}, _from, recursos) do
     total =
       recursos
       |> Map.values()
       |> Enum.filter(fn r ->
-        Recurso.coincide?(r, clave) and (is_nil(ubicacion) or Validacion.coincide?(r.ubicacion, ubicacion))
+        Recurso.coincide?(r, clave) and
+          (is_nil(ubicacion) or Validacion.coincide?(r.ubicacion, ubicacion)) and
+          (is_nil(zona) or Validacion.coincide?(r.zona, zona))
       end)
       |> Enum.reduce(0, fn r, acc -> acc + r.cantidad end)
 
@@ -252,14 +256,19 @@ defmodule Inventario do
   defp distintos(_a, _b), do: :ok
 
   # Suma al destino; si todavía no existe lo crea con los datos del origen
-  defp recibir(recursos, desde, destino, cantidad) do
+  defp recibir(recursos, desde, destino, cantidad, zona_destino) do
     case Map.fetch(recursos, {desde.codigo, destino}) do
       {:ok, existente} ->
-        Recurso.sumar(existente, cantidad, :transferencia_entrada)
+        if is_nil(zona_destino) or Validacion.coincide?(existente.zona, zona_destino) do
+          Recurso.sumar(existente, cantidad, :transferencia_entrada)
+        else
+          {:error, :zona_destino_distinta}
+        end
 
       :error ->
         with {:ok, nuevo} <-
-               Recurso.nuevo(desde.codigo, desde.nombre, desde.categoria, 0, desde.unidad, destino) do
+               Recurso.nuevo(desde.codigo, desde.nombre, desde.categoria, 0, desde.unidad, destino,
+                 zona_destino || zona_ubicacion(recursos, destino) || desde.zona) do
           Recurso.sumar(nuevo, cantidad, :transferencia_entrada)
         end
     end
@@ -267,12 +276,37 @@ defmodule Inventario do
 
   defp cumple_filtros?(recurso, filtros) do
     Enum.all?(filtros, fn
-      {campo, valor} when campo in [:categoria, :ubicacion, :codigo] ->
+      {campo, valor} when campo in [:categoria, :ubicacion, :codigo, :zona] ->
         Validacion.coincide?(Map.fetch!(recurso, campo), valor)
 
       _otro ->
         true
     end)
+  end
+
+  defp crear_recurso(codigo, nombre, categoria, cantidad, unidad, ubicacion, zona) do
+    with {:ok, recurso} <- Recurso.nuevo(codigo, nombre, categoria, cantidad, unidad, ubicacion, zona),
+         :ok <- validar_zona(recurso.zona) do
+      {:ok, recurso}
+    end
+  end
+
+  defp validar_zona(nil), do: :ok
+  defp validar_zona(zona) do
+    if Zonas.existe?(zona), do: :ok, else: {:error, {:zona_inexistente, zona}}
+  end
+
+  defp zona_ubicacion(recursos, ubicacion) do
+    Enum.find_value(recursos, fn {_, r} -> if r.ubicacion == ubicacion, do: r.zona end)
+  end
+
+  defp zona_albergue(destino) do
+    with {:ok, destino} <- Validacion.texto(destino),
+         {:ok, albergue} <- Albergues.consultar(destino) do
+      albergue.zona
+    else
+      _ -> nil
+    end
   end
 
   defp guardar(recursos) do

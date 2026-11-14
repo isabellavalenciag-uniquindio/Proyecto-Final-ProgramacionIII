@@ -109,7 +109,7 @@ defmodule Reportes do
   end
 
   def linea_recurso(%Recurso{} = r) do
-    "#{r.codigo} #{r.nombre}: #{r.cantidad} #{r.unidad} en #{r.ubicacion} (categoría #{r.categoria})"
+    "#{r.codigo} #{r.nombre}: #{r.cantidad} #{r.unidad} en #{r.ubicacion} (categoría #{r.categoria}) zona=#{r.zona || "sin_asignar"}"
   end
 
   def linea_persona(%Persona{} = p) do
