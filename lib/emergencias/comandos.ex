@@ -578,6 +578,7 @@ defmodule Comandos do
   def mensaje_error(:jerarquia_invalida), do: "Esa jerarquía no es válida (zona → sector → punto)."
   def mensaje_error(:insuficiente), do: "No hay existencias suficientes."
   def mensaje_error(:excede_requerida), do: "La cantidad supera lo que le falta a la necesidad."
+  def mensaje_error(:recursos_incompletos), do: "Primero debe cubrir toda la cantidad requerida con recursos compatibles."
   def mensaje_error(:cantidad_invalida), do: "La cantidad o el número no es válido (debe ser un entero positivo)."
   def mensaje_error(:mismo_lugar), do: "El origen y el destino son el mismo lugar."
   def mensaje_error(:texto_vacio), do: "Falta un dato obligatorio."

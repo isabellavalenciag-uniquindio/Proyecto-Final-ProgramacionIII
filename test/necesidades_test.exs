@@ -11,6 +11,25 @@ defmodule NecesidadesTest do
   end
 
   describe "Necesidad (reglas puras)" do
+    test "no permite avanzar con recursos faltantes, incluso en estados recuperados" do
+      {:ok, n} = Necesidad.nuevo("N001", :agua, 10, :alta, "z", "", "ana")
+      assert {:error, :recursos_incompletos} = Necesidad.cambiar_estado(n, :asignada)
+      {:ok, parcial} = Necesidad.asignar(n, [{"R1", "bodega", 5}])
+      assert {:error, :recursos_incompletos} = Necesidad.cambiar_estado(parcial, :asignada)
+      assert {:error, :recursos_incompletos} =
+               Necesidad.cambiar_estado(%{parcial | estado: :asignada}, :en_atencion)
+      assert {:error, :recursos_incompletos} =
+               Necesidad.cambiar_estado(%{parcial | estado: :en_atencion}, :atendida)
+      assert {:ok, %{estado: :cancelada}} = Necesidad.cambiar_estado(parcial, :cancelada)
+    end
+
+    test "una reserva completa permite avanzar hasta atendida" do
+      {:ok, n} = Necesidad.nuevo("N001", :agua, 10, :alta, "z", "", "ana")
+      {:ok, n} = Necesidad.asignar(n, [{"R1", "bodega", 10}])
+      assert {:ok, n} = Necesidad.cambiar_estado(n, :en_atencion)
+      assert {:ok, %{estado: :atendida}} = Necesidad.cambiar_estado(n, :atendida)
+    end
+
     test "valida los datos" do
       assert {:error, :tipo_invalido} = Necesidad.nuevo("N001", :xyz, 5, :alta, "z", "", "ana")
       assert {:error, :prioridad_invalida} = Necesidad.nuevo("N001", :agua, 5, :urgente, "z", "", "ana")
@@ -48,6 +67,12 @@ defmodule NecesidadesTest do
   end
 
   describe "Necesidades (proceso)" do
+    test "un cambio manual no completa una necesidad ni modifica sus reservas", ctx do
+      {:ok, n} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
+      assert {:error, :recursos_incompletos} = Necesidades.cambiar_estado(n.id, :asignada)
+      assert {:ok, ^n} = Necesidades.obtener(n.id)
+    end
+
     test "registra y lista ordenado por prioridad", ctx do
       {:ok, baja} = Necesidades.registrar(:agua, 5, :baja, ctx.zona, "", "ana")
       {:ok, critica} = Necesidades.registrar(:agua, 5, :critica, ctx.zona, "", "ana")
