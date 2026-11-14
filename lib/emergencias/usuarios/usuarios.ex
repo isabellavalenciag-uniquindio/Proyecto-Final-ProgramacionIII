@@ -3,7 +3,7 @@ defmodule Usuarios do
   Proceso que guarda los usuarios, quiénes están conectados y el registro de
   actividad.
 
-  `conectar/4` es un `call`, así que se atiende uno a uno: si dos personas
+  `conectar/5` es un `call`, así que se atiende uno a uno: si dos personas
   intentan crear el mismo usuario a la vez, la primera lo registra y la
   segunda ya lo encuentra y le valida la contraseña.
 
@@ -22,10 +22,12 @@ defmodule Usuarios do
 
   @doc """
   Conecta al usuario. Si no existe lo registra automáticamente con los datos
-  dados; si existe valida la contraseña (y ignora el tipo y la zona).
+  dados; si existe valida la contraseña (y conserva su nombre, tipo y zona).
+  El nombre completo es opcional para mantener las conexiones anteriores.
   """
-  @spec conectar(term(), term(), term(), term()) :: {:ok, map()} | {:error, atom()}
-  def conectar(usuario, clave, tipo, zona), do: GenServer.call(__MODULE__, {:conectar, usuario, clave, tipo, zona})
+  @spec conectar(term(), term(), term(), term(), term()) :: {:ok, map()} | {:error, atom()}
+  def conectar(usuario, clave, tipo, zona, nombre_completo \\ nil),
+    do: GenServer.call(__MODULE__, {:conectar, usuario, clave, tipo, zona, nombre_completo})
 
   @doc "Registra un usuario sin conectarlo."
   @spec registrar(term(), term(), term(), term(), term()) :: {:ok, map()} | {:error, atom()}
@@ -76,7 +78,7 @@ defmodule Usuarios do
   end
 
   @impl true
-  def handle_call({:conectar, usuario, clave, tipo, zona}, _from, estado) do
+  def handle_call({:conectar, usuario, clave, tipo, zona, nombre_completo}, _from, estado) do
     nombre = Usuario.normalizar_usuario(usuario)
 
     case Map.fetch(estado.usuarios, nombre) do
@@ -89,7 +91,7 @@ defmodule Usuarios do
         end
 
       :error ->
-        case Usuario.nuevo(usuario, clave, usuario, tipo, zona) do
+        case Usuario.nuevo(usuario, clave, nombre_completo || usuario, tipo, zona) do
           {:ok, nuevo} ->
             {sesion, actualizado} = estado |> agregar(nuevo) |> conectar_sesion(nuevo, true)
             {:reply, {:ok, sesion}, actualizado}

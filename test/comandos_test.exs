@@ -42,6 +42,19 @@ defmodule ComandosTest do
   end
 
   describe "sesión y permisos" do
+    test "connect acepta el nombre completo entre comillas y valida el registro", ctx do
+      usuario = "nombre#{ctx.n}"
+      linea = ~s(connect #{usuario} 1234 ciudadano norte "Ana María Gómez")
+      assert {:ok, _, %{usuario: %{nombre: "Ana María Gómez"}}} =
+               Emergencias.ejecutar(linea, Emergencias.nueva_sesion())
+      assert {:error, _, %{usuario: nil}} = Emergencias.ejecutar(
+        ~s(connect vacio#{ctx.n} 1234 ciudadano norte ""), Emergencias.nueva_sesion())
+      assert {:error, "Uso: " <> _, _} = Emergencias.ejecutar(
+        "connect extra#{ctx.n} 1234 ciudadano norte Ana Maria", Emergencias.nueva_sesion())
+      refute Usuarios.conectado?("vacio#{ctx.n}")
+      refute Usuarios.conectado?("extra#{ctx.n}")
+    end
+
     test "sin conectarse solo se puede help, connect y exit" do
       assert {:error, texto, _} = Emergencias.ejecutar("summary", Emergencias.nueva_sesion())
       assert texto =~ "conectarse"

@@ -28,7 +28,7 @@ defmodule Comandos do
   @alias %{"quit" => :exit, "salir" => :exit}
 
   @usos %{
-    connect: "connect usuario contraseña [tipo] [zona]",
+    connect: "connect usuario contraseña [tipo] [zona] [\"nombre completo\"]",
     disconnect: "disconnect",
     help: "help",
     exit: "exit",
@@ -178,15 +178,16 @@ defmodule Comandos do
 
   # ---- Sesión ----
 
-  defp correr(:connect, [usuario, clave | resto], sesion) do
-    {tipo, zona} =
+  defp correr(:connect, [usuario, clave | resto], sesion) when length(resto) <= 3 do
+    {tipo, zona, nombre} =
       case resto do
-        [t, z | _] -> {t, z}
-        [t] -> {t, "sin_zona"}
-        [] -> {"ciudadano", "sin_zona"}
+        [t, z, nombre] -> {t, z, nombre}
+        [t, z] -> {t, z, nil}
+        [t] -> {t, "sin_zona", nil}
+        [] -> {"ciudadano", "sin_zona", nil}
       end
 
-    case Usuarios.conectar(usuario, clave, tipo, zona) do
+    case Usuarios.conectar(usuario, clave, tipo, zona, nombre) do
       {:ok, info} ->
         # Si ya había otra sesión abierta, se cierra
         if sesion.usuario, do: Usuarios.desconectar(sesion.usuario.usuario, sesion.usuario.sesion_id)
@@ -552,7 +553,7 @@ defmodule Comandos do
   @doc "Texto en español para un motivo de error."
   @spec mensaje_error(term()) :: String.t()
   def mensaje_error(:comando_desconocido), do: "Comando desconocido. Escriba help para ver los comandos."
-  def mensaje_error(:sin_sesion), do: "Debe conectarse primero: connect usuario contraseña [tipo] [zona]"
+  def mensaje_error(:sin_sesion), do: "Debe conectarse primero: #{uso(:connect)}"
   def mensaje_error(:sin_permiso), do: "Su tipo de usuario no puede ejecutar ese comando."
   def mensaje_error(:comillas_sin_cerrar), do: "Hay unas comillas sin cerrar."
   def mensaje_error({:filtro_invalido, arg}), do: "Filtro inválido: #{arg}. Use campo=valor."

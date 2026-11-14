@@ -54,6 +54,16 @@ defmodule UsuariosTest do
   end
 
   describe "Usuarios (proceso)" do
+    test "el registro automático conserva el nombre completo en futuras conexiones" do
+      usuario = nuevo_nombre()
+      assert {:ok, %{nombre: "Ana María Gómez"}} =
+               Usuarios.conectar(usuario, "1234", :ciudadano, "norte", "Ana María Gómez")
+      assert {:ok, %{nombre: "Ana María Gómez", tipo: :ciudadano, zona: "norte"}} =
+               Usuarios.conectar(usuario, "1234", :administrador, "sur", "Otro nombre")
+      assert [fila] = Persistencia.cargar(:usuarios) |> Enum.filter(&(hd(&1) == usuario))
+      assert %Usuario{nombre: "Ana María Gómez"} = Usuario.desde_fila(fila)
+    end
+
     test "si el usuario no existe se registra automáticamente" do
       nombre = nuevo_nombre()
       assert {:ok, %{nuevo: true, tipo: :coordinador, zona: "centro"}} = Usuarios.conectar(nombre, "1234", "coordinador", "centro")
