@@ -6,13 +6,18 @@ defmodule Emergencias.Application do
 
       Emergencias.Supervisor (:one_for_one)
       ├── Persistencia            (GenServer: serializa escrituras a archivos)
-      ├── Registry                (nombres de los procesos de albergue)
       ├── Zonas                   (GenServer)
       ├── Inventario              (GenServer único: evita la sobreasignación)
       ├── Necesidades             (GenServer)
-      ├── AlbergueSupervisor      (DynamicSupervisor: un proceso por albergue)
+      ├── AlberguesSupervisor (:rest_for_one)
+      │   ├── Registry            (nombres de los procesos de albergue)
+      │   ├── AlbergueSupervisor  (DynamicSupervisor: un proceso por albergue)
+      │   └── AlbergueRecuperador (reconstruye los albergues)
       ├── Task.Supervisor         (tareas paralelas)
-      └── Usuarios, Personas, Mascotas   (parte B, se inician si existen)
+      ├── Usuarios, Personas, Mascotas   (se inician si existen)
+      ├── Phoenix.PubSub                (actualizaciones entre interfaces)
+      ├── Emergencias.SesionesWeb       (accesos del navegador)
+      └── EmergenciasWeb.Endpoint       (servidor HTTP y LiveView)
 
   `Persistencia` va primero porque los demás procesos leen sus datos de allí
   en `init/1`.
@@ -28,19 +33,24 @@ defmodule Emergencias.Application do
     hijos =
       [
         Persistencia,
-        {Registry, keys: :unique, name: Emergencias.RegistroAlbergues},
         Zonas,
         Inventario,
         Necesidades,
-        AlbergueSupervisor,
+        AlberguesSupervisor,
         {Task.Supervisor, name: Emergencias.TareasSupervisor}
-      ] ++ hijos_b()
+      ] ++ hijos_b() ++ [
+        {Phoenix.PubSub, name: Emergencias.PubSub},
+        Emergencias.SesionesWeb,
+        EmergenciasWeb.Endpoint
+      ]
 
-    resultado = Supervisor.start_link(hijos, strategy: :one_for_one, name: Emergencias.Supervisor)
+    Supervisor.start_link(hijos, strategy: :one_for_one, name: Emergencias.Supervisor)
+  end
 
-    # Los albergues son procesos dinámicos: se recrean desde el archivo
-    Albergues.cargar()
-    resultado
+  @impl true
+  def config_change(changed, _new, removed) do
+    EmergenciasWeb.Endpoint.config_change(changed, removed)
+    :ok
   end
 
   defp hijos_b do

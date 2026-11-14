@@ -54,7 +54,15 @@ defmodule Personas do
 
   @doc "Marca un mensaje como entregado."
   @spec marcar_entregado(integer()) :: {:ok, %Mensaje{}} | {:error, atom()}
-  def marcar_entregado(id), do: GenServer.call(__MODULE__, {:entregar, id})
+  def marcar_entregado(id), do: marcar_mensaje(id, :entregado)
+
+  @doc "Marca un mensaje como pendiente."
+  @spec marcar_pendiente(integer()) :: {:ok, %Mensaje{}} | {:error, atom()}
+  def marcar_pendiente(id), do: marcar_mensaje(id, :pendiente)
+
+  @doc "Cambia el estado de un mensaje a pendiente o entregado."
+  @spec marcar_mensaje(integer(), term()) :: {:ok, %Mensaje{}} | {:error, atom()}
+  def marcar_mensaje(id, estado), do: GenServer.call(__MODULE__, {:estado_mensaje, id, estado})
 
   # ========== Callbacks del servidor ==========
 
@@ -70,6 +78,7 @@ defmodule Personas do
   @impl true
   def handle_call({:reportar, documento, nombre, zona, estado, edad}, _from, estado_proc) do
     with {:ok, persona} <- Persona.nuevo(documento, nombre, zona, estado, edad),
+         :ok <- Zonas.validar(persona.zona),
          false <- Map.has_key?(estado_proc.personas, persona.documento) do
       {:reply, {:ok, persona}, guardar_personas(estado_proc, Map.put(estado_proc.personas, persona.documento, persona))}
     else
@@ -115,11 +124,11 @@ defmodule Personas do
     {:reply, lista, estado_proc}
   end
 
-  def handle_call({:entregar, id}, _from, estado_proc) do
+  def handle_call({:estado_mensaje, id, estado}, _from, estado_proc) do
     with {:ok, mensaje} <- buscar_mensaje(estado_proc.mensajes, id),
-         {:ok, entregado} <- Mensaje.marcar_entregado(mensaje) do
-      mensajes = Enum.map(estado_proc.mensajes, fn m -> if m.id == id, do: entregado, else: m end)
-      {:reply, {:ok, entregado}, guardar_mensajes(estado_proc, mensajes)}
+         {:ok, actualizado} <- Mensaje.cambiar_estado(mensaje, estado) do
+      mensajes = Enum.map(estado_proc.mensajes, fn m -> if m.id == id, do: actualizado, else: m end)
+      {:reply, {:ok, actualizado}, guardar_mensajes(estado_proc, mensajes)}
     else
       {:error, _} = error -> {:reply, error, estado_proc}
     end

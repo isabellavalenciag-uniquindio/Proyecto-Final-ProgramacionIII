@@ -42,6 +42,19 @@ defmodule ComandosTest do
   end
 
   describe "sesión y permisos" do
+    test "connect acepta el nombre completo entre comillas y valida el registro", ctx do
+      usuario = "nombre#{ctx.n}"
+      linea = ~s(connect #{usuario} 1234 ciudadano norte "Ana María Gómez")
+      assert {:ok, _, %{usuario: %{nombre: "Ana María Gómez"}}} =
+               Emergencias.ejecutar(linea, Emergencias.nueva_sesion())
+      assert {:error, _, %{usuario: nil}} = Emergencias.ejecutar(
+        ~s(connect vacio#{ctx.n} 1234 ciudadano norte ""), Emergencias.nueva_sesion())
+      assert {:error, "Uso: " <> _, _} = Emergencias.ejecutar(
+        "connect extra#{ctx.n} 1234 ciudadano norte Ana Maria", Emergencias.nueva_sesion())
+      refute Usuarios.conectado?("vacio#{ctx.n}")
+      refute Usuarios.conectado?("extra#{ctx.n}")
+    end
+
     test "sin conectarse solo se puede help, connect y exit" do
       assert {:error, texto, _} = Emergencias.ejecutar("summary", Emergencias.nueva_sesion())
       assert texto =~ "conectarse"
@@ -126,6 +139,16 @@ defmodule ComandosTest do
   end
 
   describe "validación de argumentos" do
+    test "los recursos se filtran por zona y rechazan filtros ajenos", ctx do
+      sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _} = Zonas.registrar(ctx.zona, "Centro", :alto)
+      assert {:ok, _, _} = Emergencias.ejecutar("register_resource R#{ctx.n} agua 10 litros #{ctx.ubicacion}", sesion)
+      assert {:ok, texto, _} = Emergencias.ejecutar("list_resources zona=#{ctx.zona}", sesion)
+      assert texto =~ "R#{ctx.n}"
+      assert {:ok, "No hay recursos.", _} = Emergencias.ejecutar("list_resources zona=fantasma", sesion)
+      assert {:error, _, _} = Emergencias.ejecutar("list_resources estado=pendiente", sesion)
+    end
+
     test "muestra el uso cuando faltan argumentos", ctx do
       sesion = sesion_como("coordinador", ctx.n, ctx.zona)
       assert {:error, "Uso: " <> uso, _} = Emergencias.ejecutar("assign_resource N001", sesion)
@@ -149,6 +172,19 @@ defmodule ComandosTest do
   end
 
   describe "flujo del enunciado" do
+    test "mark_message permite entregado y pendiente conservando los permisos", ctx do
+      voluntario = sesion_como("voluntario", ctx.n, ctx.zona)
+      ciudadano = sesion_como("ciudadano", ctx.n, ctx.zona)
+      documento = "mensaje#{ctx.n}"
+      {:ok, m} = Personas.enviar_mensaje("ana", documento, "Hola")
+      assert {:error, _, _} = Emergencias.ejecutar("mark_message #{m.id}", ciudadano)
+      assert {:ok, _, _} = Emergencias.ejecutar("mark_message #{m.id}", voluntario)
+      assert {:ok, texto, _} = Emergencias.ejecutar("mark_message #{m.id} pendiente", voluntario)
+      assert texto =~ "pendiente"
+      assert {:error, _, _} = Emergencias.ejecutar("mark_message #{m.id} cancelado", voluntario)
+      assert [%Mensaje{estado: :pendiente}] = Personas.mensajes(documento)
+    end
+
     test "necesidad, recurso, asignación y resumen", ctx do
       sesion = sesion_como("coordinador", ctx.n, ctx.zona)
 
@@ -169,6 +205,7 @@ defmodule ComandosTest do
     end
 
     test "need_status cancelada devuelve los recursos y no permite devolverlos otra vez", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       sesion = sesion_como("coordinador", ctx.n, ctx.zona)
       {:ok, _} = Inventario.registrar("R#{ctx.n}", "Agua", ctx.categoria, 50, "litros", ctx.ubicacion)
       {:ok, n} = Necesidades.registrar(:agua, 30, :alta, ctx.zona, "", sesion.usuario.usuario)
@@ -223,6 +260,7 @@ defmodule ComandosTest do
     end
 
     test "la salida del albergue actualiza el estado de la persona y su historial", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       sesion = sesion_como("voluntario", ctx.n, ctx.zona)
       documento = "salida#{ctx.n}"
       albergue = "AS#{ctx.n}"
@@ -237,6 +275,7 @@ defmodule ComandosTest do
     end
 
     test "una salida fallida no cambia el estado de la persona", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       sesion = sesion_como("voluntario", ctx.n, ctx.zona)
       documento = "ausente#{ctx.n}"
       albergue = "AS#{ctx.n}"
@@ -248,6 +287,7 @@ defmodule ComandosTest do
     end
 
     test "la salida respeta una reunificación y admite ocupantes sin reporte de persona", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       sesion = sesion_como("voluntario", ctx.n, ctx.zona)
       documento = "reunificada#{ctx.n}"
       sin_reporte = "sin_reporte#{ctx.n}"
@@ -265,6 +305,7 @@ defmodule ComandosTest do
     end
 
     test "reporta una mascota sin nombre y conserva la posición de los demás datos", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       lineas = [
         "connect vacio#{ctx.n} 1234 ciudadano #{ctx.zona}",
         ~s(report_pet found perro "" negro mediano #{ctx.zona} 300)
@@ -285,6 +326,7 @@ defmodule ComandosTest do
     end
 
     test "mascotas: reportar, coincidencias y confirmar", ctx do
+      {:ok, _} = Zonas.registrar(ctx.zona, "Zona de prueba", :alto)
       voluntario = sesion_como("voluntario", ctx.n, ctx.zona)
       coordinador = sesion_como("coordinador", ctx.n, ctx.zona)
       especie = "especie#{ctx.n}"
@@ -306,6 +348,7 @@ defmodule ComandosTest do
 
     test "transferencias entre centros", ctx do
       sesion = sesion_como("coordinador", ctx.n, ctx.zona)
+      {:ok, _} = Zonas.registrar(ctx.zona, "Centro", :alto)
       {:ok, _, _} = Emergencias.ejecutar("register_resource R#{ctx.n} agua 200 litros #{ctx.ubicacion} #{ctx.categoria}", sesion)
       {:ok, texto, _} = Emergencias.ejecutar("transfer_resource R#{ctx.n} #{ctx.ubicacion} albergue_#{ctx.n} 30", sesion)
       assert texto =~ "170"

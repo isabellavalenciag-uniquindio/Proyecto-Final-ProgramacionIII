@@ -28,7 +28,7 @@ defmodule Comandos do
   @alias %{"quit" => :exit, "salir" => :exit}
 
   @usos %{
-    connect: "connect usuario contraseña [tipo] [zona]",
+    connect: "connect usuario contraseña [tipo] [zona] [\"nombre completo\"]",
     disconnect: "disconnect",
     help: "help",
     exit: "exit",
@@ -42,19 +42,19 @@ defmodule Comandos do
     pending_needs: "pending_needs",
     need_status: "need_status id estado",
     cancel_need: "cancel_need id",
-    register_resource: "register_resource codigo nombre cantidad unidad ubicacion [categoria]",
+    register_resource: "register_resource codigo nombre cantidad unidad ubicacion [categoria] [zona]",
     resource_in: "resource_in codigo ubicacion cantidad",
     resource_out: "resource_out codigo ubicacion cantidad",
-    list_resources: "list_resources [categoria=.. ubicacion=.. codigo=..]",
+    list_resources: "list_resources [categoria=.. ubicacion=.. codigo=.. zona=..]",
     critical_resources: "critical_resources [umbral]",
     assign_resource: "assign_resource id_necesidad recurso cantidad",
-    transfer_resource: "transfer_resource codigo origen destino cantidad",
+    transfer_resource: "transfer_resource codigo origen destino cantidad [zona_destino]",
     report_person: "report_person documento nombre zona estado [edad]",
     find_person: "find_person documento | find_person [nombre=.. zona=.. estado=..]",
     update_person: "update_person documento estado",
     send_family_message: "send_family_message documento \"mensaje\"",
     list_family_messages: "list_family_messages documento",
-    mark_message: "mark_message id",
+    mark_message: "mark_message id [pendiente|entregado]",
     report_pet: "report_pet lost|found especie nombre color tamaño zona contacto [caracteristicas]",
     list_pets: "list_pets [especie=.. zona=.. estado=.. tipo=..]",
     match_pets: "match_pets",
@@ -101,14 +101,37 @@ defmodule Comandos do
         {:ok, "", sesion}
 
       [nombre | args] ->
-        with {:ok, comando} <- buscar_comando(nombre),
-             :ok <- autorizar(comando, sesion) do
-          {estado, texto, nueva} = correr(comando, args, sesion)
-          anotar_actividad(comando, linea, sesion, nueva, estado)
-          {estado, texto, nueva}
-        else
-          {:error, razon} -> {:error, mensaje_error(razon), sesion}
-        end
+        procesar(nombre, args, sesion, linea)
+    end
+  end
+
+  @doc """
+  Ejecuta una operación con argumentos separados. La web comparte aquí las
+  sesiones, permisos, reglas y actividad de la consola sin construir comandos
+  a partir del texto escrito en los formularios.
+  """
+  @spec ejecutar_operacion(atom() | String.t(), [String.t()], map()) ::
+          {:ok | :error | :salir, String.t(), map()}
+  def ejecutar_operacion(nombre, args, sesion) when is_list(args) do
+    sesion = actualizar_sesion(sesion)
+    if (is_atom(nombre) or is_binary(nombre)) and Enum.all?(args, &is_binary/1) do
+      linea = Enum.map_join([to_string(nombre) | args], " ", &inspect/1)
+      procesar(to_string(nombre), args, sesion, linea)
+    else
+      {:error, mensaje_error(:tipo_invalido), sesion}
+    end
+  end
+
+  def ejecutar_operacion(_, _, sesion), do: {:error, mensaje_error(:tipo_invalido), sesion}
+
+  defp procesar(nombre, args, sesion, linea) do
+    with {:ok, comando} <- buscar_comando(nombre),
+         :ok <- autorizar(comando, sesion) do
+      {estado, texto, nueva} = correr(comando, args, sesion)
+      anotar_actividad(comando, linea, sesion, nueva, estado)
+      {estado, texto, nueva}
+    else
+      {:error, razon} -> {:error, mensaje_error(razon), sesion}
     end
   end
 
@@ -178,15 +201,16 @@ defmodule Comandos do
 
   # ---- Sesión ----
 
-  defp correr(:connect, [usuario, clave | resto], sesion) do
-    {tipo, zona} =
+  defp correr(:connect, [usuario, clave | resto], sesion) when length(resto) <= 3 do
+    {tipo, zona, nombre} =
       case resto do
-        [t, z | _] -> {t, z}
-        [t] -> {t, "sin_zona"}
-        [] -> {"ciudadano", "sin_zona"}
+        [t, z, nombre] -> {t, z, nombre}
+        [t, z] -> {t, z, nil}
+        [t] -> {t, "sin_zona", nil}
+        [] -> {"ciudadano", "sin_zona", nil}
       end
 
-    case Usuarios.conectar(usuario, clave, tipo, zona) do
+    case Usuarios.conectar(usuario, clave, tipo, zona, nombre) do
       {:ok, info} ->
         # Si ya había otra sesión abierta, se cierra
         if sesion.usuario, do: Usuarios.desconectar(sesion.usuario.usuario, sesion.usuario.sesion_id)
@@ -268,8 +292,9 @@ defmodule Comandos do
   # ---- Recursos ----
 
   defp correr(:register_resource, [codigo, nombre, cantidad, unidad, ubicacion | resto], sesion)
-       when length(resto) <= 1 do
-    Inventario.registrar(codigo, nombre, opcional(resto, nombre), cantidad, unidad, ubicacion)
+       when length(resto) <= 2 do
+    zona = Enum.at(resto, 1, sesion.usuario.zona)
+    Inventario.registrar(codigo, nombre, opcional(resto, nombre), cantidad, unidad, ubicacion, zona)
     |> responder(sesion, &"Recurso #{&1.codigo} registrado: #{&1.cantidad} #{&1.unidad} en #{&1.ubicacion}.")
   end
 
@@ -284,7 +309,7 @@ defmodule Comandos do
   end
 
   defp correr(:list_resources, args, sesion) do
-    case filtros(args) do
+    case filtros(args, [:categoria, :ubicacion, :codigo, :zona]) do
       {:ok, filtros} ->
         {:ok, Reportes.lista(Inventario.listar(filtros), &Reportes.linea_recurso/1, "No hay recursos."), sesion}
 
@@ -307,8 +332,8 @@ defmodule Comandos do
     end)
   end
 
-  defp correr(:transfer_resource, [codigo, origen, destino, cantidad], sesion) do
-    Inventario.transferir(codigo, origen, destino, cantidad)
+  defp correr(:transfer_resource, [codigo, origen, destino, cantidad | resto], sesion) when length(resto) <= 1 do
+    Inventario.transferir(codigo, origen, destino, cantidad, List.first(resto))
     |> responder(sesion, fn %{origen: o, destino: d} ->
       "Transferencia hecha. #{o.ubicacion}: #{o.cantidad} #{o.unidad}; #{d.ubicacion}: #{d.cantidad} #{d.unidad}."
     end)
@@ -349,9 +374,11 @@ defmodule Comandos do
     {:ok, Reportes.lista(Personas.mensajes(documento), &Reportes.linea_mensaje/1, "No hay mensajes para #{documento}."), sesion}
   end
 
-  defp correr(:mark_message, [id], sesion) do
+  defp correr(:mark_message, [id | resto], sesion) when length(resto) <= 1 do
     case Integer.parse(id) do
-      {n, ""} -> Personas.marcar_entregado(n) |> responder(sesion, &"Mensaje ##{&1.id} marcado como entregado.")
+      {n, ""} when n > 0 ->
+        Personas.marcar_mensaje(n, opcional(resto, :entregado))
+        |> responder(sesion, &"Mensaje ##{&1.id} marcado como #{&1.estado}.")
       _ -> {:error, mensaje_error(:cantidad_invalida), sesion}
     end
   end
@@ -425,24 +452,12 @@ defmodule Comandos do
   end
 
   defp correr(:register_entry, [codigo, documento], sesion) do
-    with {:ok, resumen} <- Albergues.ingresar(codigo, documento) do
-      # Si la persona estaba registrada, pasa a "en albergue" (si la transición es válida)
-      _ = Personas.actualizar_estado(documento, :en_albergue)
-      {:ok, resumen}
-    end
+    Albergues.ingresar(codigo, documento)
     |> responder(sesion, &"Ingreso registrado. Ocupación #{&1.ocupacion}/#{&1.capacidad} (#{&1.cupos} cupos).")
   end
 
   defp correr(:register_exit, [codigo, documento], sesion) do
-    with {:ok, resumen} <- Albergues.salir(codigo, documento) do
-      # Solo cambia a quien aún figura en albergue; respeta los estados posteriores.
-      case Personas.obtener(documento) do
-        {:ok, %Persona{estado: :en_albergue}} -> Personas.actualizar_estado(documento, :trasladada)
-        _ -> :ok
-      end
-
-      {:ok, resumen}
-    end
+    Albergues.salir(codigo, documento)
     |> responder(sesion, &"Salida registrada. Ocupación #{&1.ocupacion}/#{&1.capacidad} (#{&1.cupos} cupos).")
   end
 
@@ -499,10 +514,10 @@ defmodule Comandos do
   end
 
   # "zona=centro prioridad=critica" -> [zona: "centro", prioridad: "critica"]
-  defp filtros(args) do
+  defp filtros(args, permitidos \\ @filtros) do
     Enum.reduce_while(args, {:ok, []}, fn arg, {:ok, acumulado} ->
       with [clave, valor] <- String.split(arg, "=", parts: 2),
-           campo when not is_nil(campo) <- Enum.find(@filtros, &(Atom.to_string(&1) == Validacion.normalizar(clave))) do
+           campo when not is_nil(campo) <- Enum.find(permitidos, &(Atom.to_string(&1) == Validacion.normalizar(clave))) do
         {:cont, {:ok, acumulado ++ [{campo, valor}]}}
       else
         _ -> {:halt, {:error, {:filtro_invalido, arg}}}
@@ -563,23 +578,29 @@ defmodule Comandos do
   @doc "Texto en español para un motivo de error."
   @spec mensaje_error(term()) :: String.t()
   def mensaje_error(:comando_desconocido), do: "Comando desconocido. Escriba help para ver los comandos."
-  def mensaje_error(:sin_sesion), do: "Debe conectarse primero: connect usuario contraseña [tipo] [zona]"
+  def mensaje_error(:sin_sesion), do: "Debe conectarse primero: #{uso(:connect)}"
   def mensaje_error(:sin_permiso), do: "Su tipo de usuario no puede ejecutar ese comando."
   def mensaje_error(:comillas_sin_cerrar), do: "Hay unas comillas sin cerrar."
   def mensaje_error({:filtro_invalido, arg}), do: "Filtro inválido: #{arg}. Use campo=valor."
   def mensaje_error({:zona_inexistente, z}), do: "La zona #{z} no existe. Regístrela con register_zone."
+  def mensaje_error({:recurso_inexistente, id}), do: "El recurso #{id} no existe."
+  def mensaje_error({:necesidad_inexistente, id}), do: "La necesidad #{id} no existe."
   def mensaje_error(:clave_incorrecta), do: "Contraseña incorrecta."
   def mensaje_error(:clave_corta), do: "La contraseña debe tener al menos 4 caracteres."
   def mensaje_error(:usuario_invalido), do: "Nombre de usuario inválido."
   def mensaje_error(:duplicado), do: "Ya existe un registro con ese identificador."
   def mensaje_error(:codigo_duplicado), do: "Ese código ya existe en la zona."
   def mensaje_error(:no_existe), do: "No se encontró lo que busca."
+  def mensaje_error(:no_disponible), do: "El albergue se está recuperando. Intente nuevamente."
   def mensaje_error(:padre_no_existe), do: "El elemento superior (zona o sector) no existe."
   def mensaje_error(:jerarquia_invalida), do: "Esa jerarquía no es válida (zona → sector → punto)."
   def mensaje_error(:insuficiente), do: "No hay existencias suficientes."
   def mensaje_error(:excede_requerida), do: "La cantidad supera lo que le falta a la necesidad."
+  def mensaje_error(:recursos_incompletos), do: "Primero debe cubrir toda la cantidad requerida con recursos compatibles."
+  def mensaje_error(:recurso_incompatible), do: "El recurso no corresponde al tipo de necesidad."
   def mensaje_error(:cantidad_invalida), do: "La cantidad o el número no es válido (debe ser un entero positivo)."
   def mensaje_error(:mismo_lugar), do: "El origen y el destino son el mismo lugar."
+  def mensaje_error(:zona_destino_distinta), do: "La zona indicada no corresponde al recurso del destino."
   def mensaje_error(:texto_vacio), do: "Falta un dato obligatorio."
   def mensaje_error(:tipo_invalido), do: "El tipo indicado no es válido."
   def mensaje_error(:prioridad_invalida), do: "Prioridad inválida (critica, alta, media o baja)."
@@ -597,6 +618,7 @@ defmodule Comandos do
   def mensaje_error(:mensaje_largo), do: "El mensaje es demasiado largo (máximo 500 caracteres)."
   def mensaje_error(:sin_cupo), do: "El albergue no tiene cupos disponibles."
   def mensaje_error(:ya_registrado), do: "Esa persona ya está en el albergue."
+  def mensaje_error(:en_otro_albergue), do: "Esa persona ya ocupa otro albergue; primero debe registrar su salida."
   def mensaje_error(:no_esta), do: "Esa persona no está en el albergue."
   def mensaje_error(:no_conectado), do: "El usuario no estaba conectado."
   def mensaje_error(otro), do: "Error: #{inspect(otro)}"

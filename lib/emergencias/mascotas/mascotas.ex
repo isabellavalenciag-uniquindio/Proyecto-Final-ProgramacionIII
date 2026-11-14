@@ -67,8 +67,10 @@ defmodule Mascotas do
 
   @impl true
   def handle_call({:reportar, {tipo, especie, nombre, color, tamano, zona, contacto, caract}}, _from, mascotas) do
-    case Mascota.nuevo(siguiente_id(mascotas), tipo, especie, nombre, color, tamano, zona, contacto, caract) do
-      {:ok, mascota} -> {:reply, {:ok, mascota}, guardar(Map.put(mascotas, mascota.id, mascota))}
+    with {:ok, mascota} <- Mascota.nuevo(siguiente_id(mascotas), tipo, especie, nombre, color, tamano, zona, contacto, caract),
+         :ok <- Zonas.validar(mascota.zona) do
+      {:reply, {:ok, mascota}, guardar(Map.put(mascotas, mascota.id, mascota))}
+    else
       {:error, _} = error -> {:reply, error, mascotas}
     end
   end

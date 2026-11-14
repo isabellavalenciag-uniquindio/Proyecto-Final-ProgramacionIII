@@ -12,6 +12,36 @@ defmodule InventarioTest do
   end
 
   describe "registrar/6" do
+    test "consulta recursos por zona y conserva la zona al transferir", ctx do
+      norte = "norte_#{ctx.codigo}"
+      sur = "sur_#{ctx.codigo}"
+      {:ok, _} = Zonas.registrar(norte, "Norte", :alto)
+      {:ok, _} = Zonas.registrar(sur, "Sur", :alto)
+      {:ok, _} = Inventario.registrar(ctx.codigo, "Agua", ctx.categoria, 50, "litros", ctx.ubicacion, norte)
+      assert Inventario.disponibilidad(ctx.codigo, nil, norte) == 50
+      assert Inventario.listar(codigo: ctx.codigo, zona: sur) == []
+      assert {:ok, %{destino: %{zona: ^sur}}} =
+               Inventario.transferir(ctx.codigo, ctx.ubicacion, ctx.ubicacion <> "sur", 20, sur)
+      assert Inventario.disponibilidad(ctx.codigo, nil, norte) == 30
+      assert Inventario.disponibilidad(ctx.codigo, nil, sur) == 20
+      assert {:error, :zona_destino_distinta} =
+               Inventario.transferir(ctx.codigo, ctx.ubicacion, ctx.ubicacion <> "sur", 1, norte)
+      assert Inventario.disponibilidad(ctx.codigo, nil, norte) == 30
+    end
+
+    test "rechaza una zona inexistente antes de guardar", ctx do
+      assert {:error, {:zona_inexistente, _}} =
+               Inventario.registrar(ctx.codigo, "Agua", ctx.categoria, 5, "litros", ctx.ubicacion, "fantasma")
+      assert {:error, :no_existe} = Inventario.obtener(ctx.codigo, ctx.ubicacion)
+    end
+
+    test "el CSV conserva la zona y admite recursos anteriores sin zona", ctx do
+      {:ok, r} = Recurso.nuevo(ctx.codigo, "Agua", ctx.categoria, 5, "litros", ctx.ubicacion, "norte")
+      fila = Recurso.a_fila(r)
+      assert Recurso.desde_fila(fila) == r
+      assert %{zona: nil} = Recurso.desde_fila(Enum.take(fila, 7))
+    end
+
     test "crea un recurso", ctx do
       assert {:ok, %Recurso{cantidad: 50}} =
                Inventario.registrar(ctx.codigo, "Agua", ctx.categoria, 50, "litros", ctx.ubicacion)

@@ -3,11 +3,11 @@ defmodule ReportesTest do
 
   setup do
     n = System.unique_integer([:positive])
+    {:ok, _} = Zonas.registrar("zona#{n}", "Zona", :alto, 10)
     {:ok, n: n, zona: "zona#{n}", categoria: "agua#{n}"}
   end
 
   test "resumen reúne recursos, necesidades, personas, mensajes, mascotas y albergues", ctx do
-    {:ok, _} = Zonas.registrar(ctx.zona, "Zona", :alto, 10)
     {:ok, _} = Inventario.registrar("R#{ctx.n}", "Agua", ctx.categoria, 50, "litros", "centro#{ctx.n}")
     {:ok, _} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
     {:ok, _} = Personas.reportar("#{ctx.n}", "Andrés", ctx.zona, :localizada)

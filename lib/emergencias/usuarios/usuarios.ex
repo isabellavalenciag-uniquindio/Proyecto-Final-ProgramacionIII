@@ -3,7 +3,7 @@ defmodule Usuarios do
   Proceso que guarda los usuarios, quiénes están conectados y el registro de
   actividad.
 
-  `conectar/4` es un `call`, así que se atiende uno a uno: si dos personas
+  `conectar/5` es un `call`, así que se atiende uno a uno: si dos personas
   intentan crear el mismo usuario a la vez, la primera lo registra y la
   segunda ya lo encuentra y le valida la contraseña.
 
@@ -22,10 +22,23 @@ defmodule Usuarios do
 
   @doc """
   Conecta al usuario. Si no existe lo registra automáticamente con los datos
-  dados; si existe valida la contraseña (y ignora el tipo y la zona).
+  dados; si existe valida la contraseña (y conserva su nombre, tipo y zona).
+  El nombre completo es opcional para mantener las conexiones anteriores.
   """
-  @spec conectar(term(), term(), term(), term()) :: {:ok, map()} | {:error, atom()}
-  def conectar(usuario, clave, tipo, zona), do: GenServer.call(__MODULE__, {:conectar, usuario, clave, tipo, zona})
+  @spec conectar(term(), term(), term(), term(), term()) :: {:ok, map()} | {:error, atom()}
+  def conectar(usuario, clave, tipo, zona, nombre_completo \\ nil),
+    do: GenServer.call(__MODULE__, {:conectar, usuario, clave, tipo, zona, nombre_completo})
+
+  @doc "Autentica una cuenta existente sin registrar usuarios desconocidos."
+  @spec autenticar(term(), term()) :: {:ok, map()} | {:error, :credenciales_invalidas}
+  def autenticar(usuario, clave), do: GenServer.call(__MODULE__, {:autenticar, usuario, clave})
+
+  @doc "Registra y conecta una cuenta nueva de forma atómica; rechaza usuarios existentes."
+  @spec registrar_y_conectar(term(), term(), term(), term(), term()) ::
+          {:ok, map()} | {:error, atom()}
+  def registrar_y_conectar(usuario, clave, nombre, tipo, zona) do
+    GenServer.call(__MODULE__, {:registrar_y_conectar, usuario, clave, nombre, tipo, zona})
+  end
 
   @doc "Registra un usuario sin conectarlo."
   @spec registrar(term(), term(), term(), term(), term()) :: {:ok, map()} | {:error, atom()}
@@ -35,7 +48,11 @@ defmodule Usuarios do
 
   @doc "Desconecta una sesión, o todas las del usuario si no se indica una."
   @spec desconectar(String.t(), reference() | :todas) :: :ok | {:error, :no_conectado}
-  def desconectar(usuario, sesion_id \\ :todas), do: GenServer.call(__MODULE__, {:desconectar, usuario, sesion_id})
+  def desconectar(usuario, sesion_id \\ :todas) do
+    resultado = GenServer.call(__MODULE__, {:desconectar, usuario, sesion_id})
+    if resultado == :ok, do: Emergencias.Eventos.notificar(:sesiones)
+    resultado
+  end
 
   @doc "Valida una sesión en memoria y devuelve los datos actuales del usuario."
   @spec validar_sesion(map()) :: {:ok, map()} | {:error, :sin_sesion}
@@ -76,7 +93,28 @@ defmodule Usuarios do
   end
 
   @impl true
-  def handle_call({:conectar, usuario, clave, tipo, zona}, _from, estado) do
+  def handle_call({:autenticar, usuario, clave}, _from, estado) do
+    with {:ok, existente} <- Map.fetch(estado.usuarios, Usuario.normalizar_usuario(usuario)),
+         true <- Usuario.verificar_clave(existente, clave) do
+      {sesion, actualizado} = conectar_sesion(estado, existente, false)
+      {:reply, {:ok, sesion}, actualizado}
+    else
+      _ -> {:reply, {:error, :credenciales_invalidas}, estado}
+    end
+  end
+
+  def handle_call({:registrar_y_conectar, usuario, clave, nombre, tipo, zona}, _from, estado) do
+    with {:ok, nuevo} <- Usuario.nuevo(usuario, clave, nombre, tipo, zona),
+         false <- Map.has_key?(estado.usuarios, nuevo.usuario) do
+      {sesion, actualizado} = estado |> agregar(nuevo) |> conectar_sesion(nuevo, true)
+      {:reply, {:ok, sesion}, actualizado}
+    else
+      true -> {:reply, {:error, :duplicado}, estado}
+      {:error, _} = error -> {:reply, error, estado}
+    end
+  end
+
+  def handle_call({:conectar, usuario, clave, tipo, zona, nombre_completo}, _from, estado) do
     nombre = Usuario.normalizar_usuario(usuario)
 
     case Map.fetch(estado.usuarios, nombre) do
@@ -89,7 +127,7 @@ defmodule Usuarios do
         end
 
       :error ->
-        case Usuario.nuevo(usuario, clave, usuario, tipo, zona) do
+        case Usuario.nuevo(usuario, clave, nombre_completo || usuario, tipo, zona) do
           {:ok, nuevo} ->
             {sesion, actualizado} = estado |> agregar(nuevo) |> conectar_sesion(nuevo, true)
             {:reply, {:ok, sesion}, actualizado}

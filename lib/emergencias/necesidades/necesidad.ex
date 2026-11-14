@@ -123,8 +123,10 @@ defmodule Necesidad do
     with {:ok, nuevo} <- Validacion.atomo(nuevo, @estados, :estado_invalido) do
       cond do
         actual in [:atendida, :cancelada] -> {:error, :ya_cerrada}
-        nuevo in Map.fetch!(@transiciones, actual) -> {:ok, %{n | estado: nuevo}}
-        true -> {:error, :transicion_invalida}
+        nuevo not in Map.fetch!(@transiciones, actual) -> {:error, :transicion_invalida}
+        nuevo in [:asignada, :en_atencion, :atendida] and faltante(n) > 0 ->
+          {:error, :recursos_incompletos}
+        true -> {:ok, %{n | estado: nuevo}}
       end
     end
   end

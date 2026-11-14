@@ -46,6 +46,16 @@ defmodule PersonasTest do
   end
 
   describe "Mensaje" do
+    test "permite devolver a pendiente y rechaza estados inválidos o repetidos" do
+      {:ok, m} = Mensaje.nuevo(1, "ana", "123", "Estoy bien")
+      {:ok, entregado} = Mensaje.marcar_entregado(m)
+      assert {:ok, pendiente} = Mensaje.cambiar_estado(entregado, "Pendiente")
+      assert pendiente == m
+      assert {:error, :mismo_estado} = Mensaje.cambiar_estado(pendiente, :pendiente)
+      assert {:error, :estado_invalido} = Mensaje.cambiar_estado(entregado, :cancelado)
+      assert pendiente |> Mensaje.a_fila() |> Mensaje.desde_fila() == pendiente
+    end
+
     test "nace pendiente y se entrega una sola vez" do
       {:ok, m} = Mensaje.nuevo(1, "ana", "123", "Estoy bien")
       assert m.estado == :pendiente
@@ -65,9 +75,30 @@ defmodule PersonasTest do
   end
 
   describe "Personas (proceso)" do
-    test "registra y busca por documento, nombre, zona y estado" do
+    test "guarda el cambio a pendiente y no entrega dos veces simultáneamente" do
+      destinatario = doc()
+      {:ok, m} = Personas.enviar_mensaje("ana", destinatario, "Hola")
+      resultados = 1..2
+        |> Enum.map(fn _ -> Task.async(fn -> Personas.marcar_entregado(m.id) end) end)
+        |> Task.await_many()
+      assert Enum.count(resultados, &match?({:ok, _}, &1)) == 1
+      assert Enum.count(resultados, &(&1 == {:error, :ya_entregado})) == 1
+      assert {:ok, %Mensaje{estado: :pendiente}} = Personas.marcar_pendiente(m.id)
+      assert {:error, :estado_invalido} = Personas.marcar_mensaje(m.id, :cancelado)
+      assert [%Mensaje{estado: :pendiente}] = Personas.mensajes(destinatario)
+      fila = Persistencia.cargar(:mensajes) |> Enum.find(&(hd(&1) == to_string(m.id)))
+      assert %Mensaje{estado: :pendiente} = Mensaje.desde_fila(fila)
+    end
+
+    setup do
+      zona = "zona#{System.unique_integer([:positive])}"
+      {:ok, _} = Zonas.registrar(zona, "Zona de prueba", :alto)
+      {:ok, zona: zona}
+    end
+
+    test "registra y busca por documento, nombre, zona y estado", ctx do
       d = doc()
-      zona = "zona#{d}"
+      zona = ctx.zona
       {:ok, _} = Personas.reportar(d, "Andrés Gómez", zona, "localizada", 30)
 
       assert [%Persona{documento: ^d}] = Personas.buscar(documento: d)
@@ -76,15 +107,15 @@ defmodule PersonasTest do
       assert [] = Personas.buscar(zona: zona, estado: :reunificada)
     end
 
-    test "no repite documentos" do
+    test "no repite documentos", ctx do
       d = doc()
-      {:ok, _} = Personas.reportar(d, "A", "z", :reportada)
-      assert {:error, :duplicado} = Personas.reportar(d, "B", "z", :reportada)
+      {:ok, _} = Personas.reportar(d, "A", ctx.zona, :reportada)
+      assert {:error, :duplicado} = Personas.reportar(d, "B", ctx.zona, :reportada)
     end
 
-    test "actualiza el estado y conserva el historial" do
+    test "actualiza el estado y conserva el historial", ctx do
       d = doc()
-      {:ok, _} = Personas.reportar(d, "A", "z", :reportada)
+      {:ok, _} = Personas.reportar(d, "A", ctx.zona, :reportada)
       assert {:ok, %Persona{estado: :localizada}} = Personas.actualizar_estado(d, :localizada)
       assert {:ok, [{:localizada, _}, {:reportada, _}]} = Personas.historial(d)
       assert {:error, :no_existe} = Personas.actualizar_estado("no_existe_#{d}", :localizada)
@@ -103,12 +134,12 @@ defmodule PersonasTest do
       assert [%Mensaje{estado: :entregado}, %Mensaje{estado: :pendiente}] = Personas.mensajes(d)
     end
 
-    test "10 reportes simultáneos del mismo documento: solo uno se registra" do
+    test "10 reportes simultáneos del mismo documento: solo uno se registra", ctx do
       d = doc()
 
       resultados =
         1..10
-        |> Enum.map(fn _ -> Task.async(fn -> Personas.reportar(d, "A", "z", :reportada) end) end)
+        |> Enum.map(fn _ -> Task.async(fn -> Personas.reportar(d, "A", ctx.zona, :reportada) end) end)
         |> Task.await_many()
 
       assert Enum.count(resultados, &match?({:ok, _}, &1)) == 1

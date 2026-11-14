@@ -3,6 +3,7 @@ defmodule NecesidadesTest do
 
   setup do
     n = System.unique_integer([:positive])
+    {:ok, _} = Zonas.registrar("zona#{n}", "Zona de prueba", :alto)
     {:ok, zona: "zona#{n}", categoria: "agua#{n}", ubicacion: "centro#{n}", codigo: "R#{n}"}
   end
 
@@ -11,6 +12,25 @@ defmodule NecesidadesTest do
   end
 
   describe "Necesidad (reglas puras)" do
+    test "no permite avanzar con recursos faltantes, incluso en estados recuperados" do
+      {:ok, n} = Necesidad.nuevo("N001", :agua, 10, :alta, "z", "", "ana")
+      assert {:error, :recursos_incompletos} = Necesidad.cambiar_estado(n, :asignada)
+      {:ok, parcial} = Necesidad.asignar(n, [{"R1", "bodega", 5}])
+      assert {:error, :recursos_incompletos} = Necesidad.cambiar_estado(parcial, :asignada)
+      assert {:error, :recursos_incompletos} =
+               Necesidad.cambiar_estado(%{parcial | estado: :asignada}, :en_atencion)
+      assert {:error, :recursos_incompletos} =
+               Necesidad.cambiar_estado(%{parcial | estado: :en_atencion}, :atendida)
+      assert {:ok, %{estado: :cancelada}} = Necesidad.cambiar_estado(parcial, :cancelada)
+    end
+
+    test "una reserva completa permite avanzar hasta atendida" do
+      {:ok, n} = Necesidad.nuevo("N001", :agua, 10, :alta, "z", "", "ana")
+      {:ok, n} = Necesidad.asignar(n, [{"R1", "bodega", 10}])
+      assert {:ok, n} = Necesidad.cambiar_estado(n, :en_atencion)
+      assert {:ok, %{estado: :atendida}} = Necesidad.cambiar_estado(n, :atendida)
+    end
+
     test "valida los datos" do
       assert {:error, :tipo_invalido} = Necesidad.nuevo("N001", :xyz, 5, :alta, "z", "", "ana")
       assert {:error, :prioridad_invalida} = Necesidad.nuevo("N001", :agua, 5, :urgente, "z", "", "ana")
@@ -48,6 +68,37 @@ defmodule NecesidadesTest do
   end
 
   describe "Necesidades (proceso)" do
+    test "rechaza medicamentos para agua sin descontar ni completar la solicitud", ctx do
+      {:ok, _} = Inventario.registrar(ctx.codigo, "Medicamentos", "medicamentos", 20, "cajas", ctx.ubicacion)
+      {:ok, n} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
+      assert {:error, :recurso_incompatible} = Necesidades.asignar(n.id, ctx.codigo, 10)
+      assert {:ok, ^n} = Necesidades.obtener(n.id)
+      assert Inventario.disponibilidad(ctx.codigo) == 20
+    end
+
+    test "una categoría conocida prevalece sobre un nombre contradictorio", ctx do
+      {:ok, _} = Inventario.registrar(ctx.codigo, "Agua", "medicamentos", 20, "cajas", ctx.ubicacion)
+      {:ok, n} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
+      assert {:error, :recurso_incompatible} = Necesidades.asignar(n.id, ctx.codigo, 10)
+      assert Inventario.disponibilidad(ctx.codigo) == 20
+    end
+
+    test "una reserva por categoría no mezcla recursos incompatibles", ctx do
+      stock(ctx, 5)
+      {:ok, _} = Inventario.registrar(ctx.codigo <> "M", "Medicamentos", ctx.categoria, 20, "cajas", ctx.ubicacion)
+      {:ok, n} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
+      assert {:error, :insuficiente} = Necesidades.asignar(n.id, ctx.categoria, 10)
+      assert Inventario.disponibilidad(ctx.categoria) == 25
+      assert {:ok, %{estado: :pendiente}} = Necesidades.asignar(n.id, ctx.categoria, 5)
+      assert Inventario.disponibilidad(ctx.categoria) == 20
+    end
+
+    test "un cambio manual no completa una necesidad ni modifica sus reservas", ctx do
+      {:ok, n} = Necesidades.registrar(:agua, 10, :alta, ctx.zona, "", "ana")
+      assert {:error, :recursos_incompletos} = Necesidades.cambiar_estado(n.id, :asignada)
+      assert {:ok, ^n} = Necesidades.obtener(n.id)
+    end
+
     test "registra y lista ordenado por prioridad", ctx do
       {:ok, baja} = Necesidades.registrar(:agua, 5, :baja, ctx.zona, "", "ana")
       {:ok, critica} = Necesidades.registrar(:agua, 5, :critica, ctx.zona, "", "ana")

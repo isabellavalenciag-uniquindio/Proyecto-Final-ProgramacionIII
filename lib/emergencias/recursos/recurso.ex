@@ -11,7 +11,7 @@ defmodule Recurso do
   """
 
   @enforce_keys [:codigo, :nombre, :categoria, :unidad, :ubicacion]
-  defstruct [:codigo, :nombre, :categoria, :unidad, :ubicacion, cantidad: 0, movimientos: []]
+  defstruct [:codigo, :nombre, :categoria, :unidad, :ubicacion, :zona, cantidad: 0, movimientos: []]
 
   @tipos_movimiento [
     :alta,
@@ -33,27 +33,32 @@ defmodule Recurso do
       iex> r.cantidad
       200
   """
-  @spec nuevo(term(), term(), term(), term(), term(), term()) ::
+  @spec nuevo(term(), term(), term(), term(), term(), term(), term()) ::
           {:ok, %__MODULE__{}} | {:error, atom()}
-  def nuevo(codigo, nombre, categoria, cantidad, unidad, ubicacion) do
+  def nuevo(codigo, nombre, categoria, cantidad, unidad, ubicacion, zona \\ nil) do
     with {:ok, codigo} <- Validacion.texto(codigo),
          {:ok, nombre} <- Validacion.texto(nombre),
          {:ok, categoria} <- Validacion.texto(categoria),
          {:ok, unidad} <- Validacion.texto(unidad),
          {:ok, ubicacion} <- Validacion.texto(ubicacion),
-         {:ok, cantidad} <- Validacion.entero_no_negativo(cantidad) do
+         {:ok, cantidad} <- Validacion.entero_no_negativo(cantidad),
+         {:ok, zona} <- validar_zona(zona) do
       recurso = %__MODULE__{
         codigo: codigo,
         nombre: nombre,
         categoria: categoria,
         unidad: unidad,
         ubicacion: ubicacion,
+        zona: zona,
         cantidad: cantidad
       }
 
       {:ok, registrar_movimiento(recurso, :alta, cantidad)}
     end
   end
+
+  defp validar_zona(nil), do: {:ok, nil}
+  defp validar_zona(zona), do: Validacion.texto(zona)
 
   @doc "Clave única del recurso: `{codigo, ubicacion}`."
   @spec clave(%__MODULE__{}) :: {String.t(), String.t()}
@@ -63,6 +68,19 @@ defmodule Recurso do
   @spec coincide?(%__MODULE__{}, term()) :: boolean()
   def coincide?(%__MODULE__{} = r, clave) do
     Validacion.coincide?(r.codigo, clave) or Validacion.coincide?(r.categoria, clave)
+  end
+
+  @doc """
+  Comprueba el tipo de ayuda que puede cubrir el recurso. Una categoría de
+  necesidad conocida tiene prioridad; para categorías personalizadas se usa
+  el nombre del recurso (por ejemplo, Agua en la categoría agua_potable).
+  """
+  @spec compatible?(%__MODULE__{}, atom()) :: boolean()
+  def compatible?(%__MODULE__{} = r, tipo) do
+    case Validacion.atomo(r.categoria, Necesidad.tipos()) do
+      {:ok, categoria} -> categoria == tipo
+      {:error, _} -> Validacion.coincide?(r.nombre, tipo)
+    end
   end
 
   @doc "Suma unidades al recurso. Rechaza cantidades que no sean positivas."
@@ -108,13 +126,18 @@ defmodule Recurso do
       to_string(r.cantidad),
       Archivo.sanear(r.unidad),
       Archivo.sanear(r.ubicacion),
-      movimientos
+      movimientos,
+      Archivo.sanear(r.zona || "")
     ]
   end
 
   @doc "Reconstruye un recurso desde una fila del CSV."
   @spec desde_fila([String.t()]) :: %__MODULE__{}
   def desde_fila([codigo, nombre, categoria, cantidad, unidad, ubicacion, movimientos]) do
+    desde_fila([codigo, nombre, categoria, cantidad, unidad, ubicacion, movimientos, ""])
+  end
+
+  def desde_fila([codigo, nombre, categoria, cantidad, unidad, ubicacion, movimientos, zona]) do
     %__MODULE__{
       codigo: codigo,
       nombre: nombre,
@@ -122,6 +145,7 @@ defmodule Recurso do
       cantidad: String.to_integer(cantidad),
       unidad: unidad,
       ubicacion: ubicacion,
+      zona: if(zona == "", do: nil, else: zona),
       movimientos: movimientos |> Archivo.texto_a_lista() |> Enum.map(&movimiento_desde_texto/1)
     }
   end

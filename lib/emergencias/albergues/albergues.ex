@@ -9,17 +9,24 @@ defmodule Albergues do
   @spec registrar(term(), term(), term(), term()) :: {:ok, map()} | {:error, atom()}
   def registrar(codigo, nombre, zona, capacidad) do
     with {:ok, albergue} <- Albergue.nuevo(codigo, nombre, zona, capacidad),
+         :ok <- Zonas.validar(albergue.zona),
          {:ok, _pid} <- AlbergueSupervisor.iniciar_albergue(albergue) do
       {:ok, Albergue.resumen(albergue)}
     end
   end
 
-  @doc "Recrea los procesos de los albergues guardados. Se llama al iniciar la aplicación."
-  @spec cargar() :: :ok
+  @doc "Recrea los albergues al arrancar o recuperar su árbol de supervisión."
+  @spec cargar() :: :ok | {:error, term()}
   def cargar do
     :albergues
     |> Persistencia.cargar()
-    |> Enum.each(fn fila -> fila |> Albergue.desde_fila() |> AlbergueSupervisor.iniciar_albergue() end)
+    |> Enum.reduce_while(:ok, fn fila, :ok ->
+      case fila |> Albergue.desde_fila() |> AlbergueSupervisor.iniciar_albergue() do
+        {:ok, _} -> {:cont, :ok}
+        {:error, :duplicado} -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
   end
 
   @doc "Registra el ingreso de una persona (por documento)."

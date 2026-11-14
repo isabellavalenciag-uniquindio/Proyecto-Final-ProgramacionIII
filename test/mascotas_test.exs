@@ -97,6 +97,7 @@ defmodule MascotasTest do
   describe "Mascotas (proceso)" do
     setup do
       n = System.unique_integer([:positive])
+      {:ok, _} = Zonas.registrar("zona#{n}", "Zona de prueba", :alto)
       {:ok, especie: "especie#{n}", zona: "zona#{n}"}
     end
 

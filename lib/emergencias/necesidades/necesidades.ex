@@ -56,7 +56,7 @@ defmodule Necesidades do
     with {:ok, cantidad} <- Validacion.entero_positivo(cantidad),
          {:ok, necesidad} <- obtener(id),
          :ok <- verificar_asignable(necesidad, cantidad),
-         {:ok, detalle} <- Inventario.reservar(clave_recurso, cantidad) do
+         {:ok, detalle} <- Inventario.reservar(clave_recurso, cantidad, necesidad.tipo) do
       case GenServer.call(__MODULE__, {:registrar_asignacion, id, detalle}) do
         {:ok, _} = ok ->
           ok
@@ -97,12 +97,11 @@ defmodule Necesidades do
 
   @impl true
   def handle_call({:registrar, tipo, cantidad, prioridad, zona, descripcion, responsable}, _from, lista) do
-    case Necesidad.nuevo(siguiente_id(lista), tipo, cantidad, prioridad, zona, descripcion, responsable) do
-      {:ok, necesidad} ->
-        {:reply, {:ok, necesidad}, guardar(Necesidad.insertar_ordenado(lista, necesidad))}
-
-      {:error, _} = error ->
-        {:reply, error, lista}
+    with {:ok, necesidad} <- Necesidad.nuevo(siguiente_id(lista), tipo, cantidad, prioridad, zona, descripcion, responsable),
+         :ok <- Zonas.validar(necesidad.zona) do
+      {:reply, {:ok, necesidad}, guardar(Necesidad.insertar_ordenado(lista, necesidad))}
+    else
+      {:error, _} = error -> {:reply, error, lista}
     end
   end
 
