@@ -29,6 +29,17 @@ defmodule Usuarios do
   def conectar(usuario, clave, tipo, zona, nombre_completo \\ nil),
     do: GenServer.call(__MODULE__, {:conectar, usuario, clave, tipo, zona, nombre_completo})
 
+  @doc "Autentica una cuenta existente sin registrar usuarios desconocidos."
+  @spec autenticar(term(), term()) :: {:ok, map()} | {:error, :credenciales_invalidas}
+  def autenticar(usuario, clave), do: GenServer.call(__MODULE__, {:autenticar, usuario, clave})
+
+  @doc "Registra y conecta una cuenta nueva de forma atómica; rechaza usuarios existentes."
+  @spec registrar_y_conectar(term(), term(), term(), term(), term()) ::
+          {:ok, map()} | {:error, atom()}
+  def registrar_y_conectar(usuario, clave, nombre, tipo, zona) do
+    GenServer.call(__MODULE__, {:registrar_y_conectar, usuario, clave, nombre, tipo, zona})
+  end
+
   @doc "Registra un usuario sin conectarlo."
   @spec registrar(term(), term(), term(), term(), term()) :: {:ok, map()} | {:error, atom()}
   def registrar(usuario, clave, nombre, tipo, zona) do
@@ -82,6 +93,27 @@ defmodule Usuarios do
   end
 
   @impl true
+  def handle_call({:autenticar, usuario, clave}, _from, estado) do
+    with {:ok, existente} <- Map.fetch(estado.usuarios, Usuario.normalizar_usuario(usuario)),
+         true <- Usuario.verificar_clave(existente, clave) do
+      {sesion, actualizado} = conectar_sesion(estado, existente, false)
+      {:reply, {:ok, sesion}, actualizado}
+    else
+      _ -> {:reply, {:error, :credenciales_invalidas}, estado}
+    end
+  end
+
+  def handle_call({:registrar_y_conectar, usuario, clave, nombre, tipo, zona}, _from, estado) do
+    with {:ok, nuevo} <- Usuario.nuevo(usuario, clave, nombre, tipo, zona),
+         false <- Map.has_key?(estado.usuarios, nuevo.usuario) do
+      {sesion, actualizado} = estado |> agregar(nuevo) |> conectar_sesion(nuevo, true)
+      {:reply, {:ok, sesion}, actualizado}
+    else
+      true -> {:reply, {:error, :duplicado}, estado}
+      {:error, _} = error -> {:reply, error, estado}
+    end
+  end
+
   def handle_call({:conectar, usuario, clave, tipo, zona, nombre_completo}, _from, estado) do
     nombre = Usuario.normalizar_usuario(usuario)
 

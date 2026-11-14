@@ -2,8 +2,8 @@ defmodule EmergenciasWeb.AccesoLive do
   use EmergenciasWeb, :live_view
 
   @impl true
-  def mount(_, session, socket) do
-    socket = assign(socket, page_title: "Bienvenido", registro: false)
+  def mount(params, session, socket) do
+    socket = assign(socket, page_title: "Bienvenido", registro: params["modo"] == "registro")
 
     case Emergencias.SesionesWeb.obtener(session["token"]) do
       {:ok, _} -> {:ok, redirect(socket, to: "/")}
@@ -117,6 +117,11 @@ defmodule EmergenciasWeb.AccesoLive do
             id="form-acceso"
             class="access-form"
           >
+            <input
+              type="hidden"
+              name="acceso[modo]"
+              value={if @registro, do: "registro", else: "ingreso"}
+            />
             <div :if={@registro} class="form-field">
               <label for="nombre">Nombre completo</label><input
                 id="nombre"
@@ -176,7 +181,7 @@ defmodule EmergenciasWeb.AccesoLive do
             <.icono nombre="shield" />Tus acciones se registran para mantener una coordinación clara y responsable.
           </p>
           <p :if={!@registro} class="access-first">
-            ¿Primera vez? El sistema también puede crear tu acceso como ciudadano al ingresar.
+            ¿Primera vez? Selecciona Crear acceso para registrar tu cuenta antes de ingresar.
           </p>
         </div>
         <footer class="access-footer">

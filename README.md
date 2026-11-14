@@ -39,6 +39,11 @@ contraseña, rol y zona principal. Los roles corresponden a la simulación
 académica del enunciado. Un usuario existente conserva sus datos y permisos
 al volver a conectarse.
 
+**Ingresar** exige una cuenta previamente registrada y su contraseña correcta;
+no crea usuarios. **Crear acceso** registra una cuenta nueva y rechaza nombres
+de usuario que ya existen. El comando `connect` de la consola conserva el
+registro automático solicitado en el enunciado del proyecto.
+
 ### Primer recorrido
 
 1. Crear un acceso como coordinador o administrador.

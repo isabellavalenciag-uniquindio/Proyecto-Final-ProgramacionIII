@@ -54,6 +54,45 @@ defmodule UsuariosTest do
   end
 
   describe "Usuarios (proceso)" do
+    test "autenticar un usuario desconocido no lo registra ni lo conecta" do
+      usuario = nuevo_nombre()
+      assert {:error, :credenciales_invalidas} = Usuarios.autenticar(usuario, "1234")
+      refute Usuarios.conectado?(usuario)
+      refute Enum.any?(Usuarios.listar(), &(&1.usuario == usuario))
+      refute Enum.any?(Persistencia.cargar(:usuarios), &(hd(&1) == usuario))
+    end
+
+    test "autenticar exige la contraseña de una cuenta existente" do
+      usuario = nuevo_nombre()
+      {:ok, _} = Usuarios.registrar(usuario, "original", "Ana", :voluntario, "norte")
+      assert {:error, :credenciales_invalidas} = Usuarios.autenticar(usuario, "incorrecta")
+      refute Usuarios.conectado?(usuario)
+      assert {:ok, %{usuario: ^usuario, tipo: :voluntario, nuevo: false}} =
+               Usuarios.autenticar(" #{String.upcase(usuario)} ", "original")
+    end
+
+    test "registrar y conectar rechaza duplicados sin sustituir la cuenta" do
+      usuario = nuevo_nombre()
+      assert {:ok, %{nuevo: true}} =
+               Usuarios.registrar_y_conectar(usuario, "original", "Ana", :ciudadano, "norte")
+      assert {:error, :duplicado} =
+               Usuarios.registrar_y_conectar(usuario, "otra", "Otra", :administrador, "sur")
+      assert {:error, :credenciales_invalidas} = Usuarios.autenticar(usuario, "otra")
+      assert {:ok, %{nombre: "Ana", tipo: :ciudadano, zona: "norte"}} =
+               Usuarios.autenticar(usuario, "original")
+    end
+
+    test "dos registros simultáneos de la misma cuenta crean una sola sesión" do
+      usuario = nuevo_nombre()
+      resultados = 1..2
+        |> Enum.map(fn _ ->
+          Task.async(fn -> Usuarios.registrar_y_conectar(usuario, "1234", "Ana", :ciudadano, "norte") end)
+        end)
+        |> Task.await_many()
+      assert Enum.count(resultados, &match?({:ok, _}, &1)) == 1
+      assert Enum.count(resultados, &(&1 == {:error, :duplicado})) == 1
+    end
+
     test "el registro automático conserva el nombre completo en futuras conexiones" do
       usuario = nuevo_nombre()
       assert {:ok, %{nombre: "Ana María Gómez"}} =

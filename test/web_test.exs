@@ -31,6 +31,117 @@ defmodule EmergenciasWebTest do
     assert {:error, {:redirect, %{to: "/acceso"}}} = live(conn, "/")
   end
 
+  test "Ingresar no crea una cuenta aunque se envíen datos de registro", ctx do
+    usuario = ctx.id <> "desconocido"
+
+    for modo <- [nil, "ingreso", "invalido"] do
+      datos = %{
+        "usuario" => usuario,
+        "clave" => "1234",
+        "nombre" => "Intruso",
+        "tipo" => "administrador",
+        "zona" => ctx.id
+      }
+
+      datos = if modo, do: Map.put(datos, "modo", modo), else: datos
+      conn = post(build_conn(), "/sesion", %{"acceso" => datos})
+      assert redirected_to(conn) == "/acceso"
+      assert get_session(conn, :token) == nil
+    end
+
+    refute Usuarios.conectado?(usuario)
+    refute Enum.any?(Usuarios.listar(), &(&1.usuario == usuario))
+    refute Enum.any?(Persistencia.cargar(:usuarios), &(hd(&1) == usuario))
+  end
+
+  test "Ingresar rechaza contraseñas incorrectas sin emitir un token", ctx do
+    conn =
+      post(build_conn(), "/sesion", %{
+        "acceso" => %{"modo" => "ingreso", "usuario" => ctx.id, "clave" => "incorrecta"}
+      })
+
+    assert redirected_to(conn) == "/acceso"
+    assert get_session(conn, :token) == nil
+    assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "Usuario o contraseña incorrectos"
+  end
+
+  test "Crear acceso registra una cuenta nueva que después puede ingresar", ctx do
+    usuario = ctx.id <> "nuevo"
+
+    conn =
+      post(build_conn(), "/sesion", %{
+        "acceso" => %{
+          "modo" => "registro",
+          "usuario" => usuario,
+          "clave" => "original",
+          "nombre" => "Ana Nueva",
+          "tipo" => "voluntario",
+          "zona" => ctx.id
+        }
+      })
+
+    assert redirected_to(conn) == "/"
+
+    assert {:ok, %{usuario: %{usuario: ^usuario, nombre: "Ana Nueva", tipo: :voluntario}}} =
+             SesionesWeb.obtener(get_session(conn, :token))
+
+    conn = conn |> recycle() |> post("/salir", %{})
+    assert redirected_to(conn) == "/acceso"
+
+    conn =
+      conn
+      |> recycle()
+      |> post("/sesion", %{
+        "acceso" => %{
+          "modo" => "ingreso",
+          "usuario" => usuario,
+          "clave" => "original",
+          "tipo" => "administrador"
+        }
+      })
+
+    assert redirected_to(conn) == "/"
+
+    assert {:ok, %{usuario: %{tipo: :voluntario}}} =
+             SesionesWeb.obtener(get_session(conn, :token))
+  end
+
+  test "Crear acceso rechaza una cuenta existente incluso con su contraseña correcta", ctx do
+    conn =
+      post(build_conn(), "/sesion", %{
+        "acceso" => %{
+          "modo" => "registro",
+          "usuario" => ctx.id,
+          "clave" => "clave-prueba",
+          "nombre" => "Nombre cambiado",
+          "tipo" => "ciudadano",
+          "zona" => "otra"
+        }
+      })
+
+    assert redirected_to(conn) == "/acceso?modo=registro"
+    assert get_session(conn, :token) == nil
+    assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "ya está registrado"
+
+    assert {:ok, %{nombre: "Coordinadora Web", tipo: :administrador, zona: zona}} =
+             Usuarios.autenticar(ctx.id, "clave-prueba")
+
+    assert zona == ctx.id
+  end
+
+  test "cada pestaña del acceso envía su modo y mantiene el registro al corregir errores" do
+    {:ok, view, _} = live(build_conn(), "/acceso")
+    assert has_element?(view, "input[name='acceso[modo]'][value='ingreso']")
+    view |> element("button[phx-value-valor=registro]") |> render_click()
+    assert has_element?(view, "input[name='acceso[modo]'][value='registro']")
+    assert has_element?(view, "#nombre")
+    view |> element("button[phx-value-valor=ingreso]") |> render_click()
+    assert has_element?(view, "input[name='acceso[modo]'][value='ingreso']")
+    refute has_element?(view, "#nombre")
+    {:ok, registro, _} = live(build_conn(), "/acceso?modo=registro")
+    assert has_element?(registro, "input[name='acceso[modo]'][value='registro']")
+  end
+
   test "las operaciones estructuradas conservan comillas y validan permisos", ctx do
     nombre = ~s(Zona "Puerta norte")
 
